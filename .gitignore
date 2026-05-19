@@ -1,0 +1,10 @@
+# Build output
+build/
+
+# Whisper model weights (large binaries — download separately)
+*.bin
+*.gguf
+models/
+
+# Old whisper.cpp source copy (replaced by submodule)
+whisper.cpp-master/
