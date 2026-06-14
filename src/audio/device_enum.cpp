@@ -6,6 +6,8 @@
 #include <propvarutil.h>
 #include <objbase.h>
 
+#include "../../audio_engine/src/main/cpp/usb_audio.h"
+
 namespace audio {
 
 namespace {
@@ -107,6 +109,27 @@ std::vector<Device> enumerate_capture_devices() {
 
     safe_release(col);
     safe_release(enumer);
+
+    // Add Direct USB DAC devices
+    auto usb_devices = UsbAudioDriver::enumerateUsbAudioDevices();
+    for (const auto& udev : usb_devices) {
+        Device d;
+        wchar_t id_buf[64];
+        swprintf_s(id_buf, L"LIBUSB:%04X:%04X", udev.vid, udev.pid);
+        d.id = id_buf;
+
+        int size = MultiByteToWideChar(CP_UTF8, 0, udev.name.c_str(), -1, nullptr, 0);
+        if (size > 0) {
+            std::wstring wname(size, 0);
+            MultiByteToWideChar(CP_UTF8, 0, udev.name.c_str(), -1, &wname[0], size);
+            d.friendly_name = L"[USB DAC] " + wname;
+            d.friendly_name.resize(wcslen(d.friendly_name.c_str()));
+        } else {
+            d.friendly_name = L"[USB DAC] Dispositivo Desconocido";
+        }
+        result.push_back(std::move(d));
+    }
+
     return result;
 }
 
@@ -136,6 +159,15 @@ bool device_exists(const std::wstring & id) {
 
 std::wstring friendly_name_for(const std::wstring & id) {
     if (id.empty()) return {};
+
+    if (id.rfind(L"LIBUSB:", 0) == 0) {
+        auto devices = enumerate_capture_devices();
+        for (const auto & d : devices) {
+            if (d.id == id) return d.friendly_name;
+        }
+        return L"[USB DAC] Desconocido";
+    }
+
     ComGuard guard;
     IMMDeviceEnumerator * enumer = create_enumerator();
     if (!enumer) return {};

@@ -39,6 +39,15 @@ else()
     add_subdirectory(whisper.cpp)
 endif()
 
+# Include audio_engine
+add_subdirectory(audio_engine/src/main/cpp/windows)
+
+# Include soxr
+set(BUILD_TESTS OFF CACHE BOOL "Build soxr tests" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "Build soxr examples" FORCE)
+set(WITH_OPENMP OFF CACHE BOOL "Build soxr with OpenMP" FORCE)
+add_subdirectory(soxr)
+
 add_executable(whisper_destilado WIN32
     src/main.cpp
     src/window.cpp
@@ -64,6 +73,8 @@ target_include_directories(whisper_destilado PRIVATE src)
 
 target_link_libraries(whisper_destilado PRIVATE
     whisper          # ggml/ggml-vulkan/ggml-cpu vienen transitivos
+    audio_engine_windows
+    soxr
     ole32 propsys mmdevapi avrt
     comctl32 comdlg32 gdi32 user32 shell32 winmm advapi32 uuid
     mfplat mfreadwrite mfuuid

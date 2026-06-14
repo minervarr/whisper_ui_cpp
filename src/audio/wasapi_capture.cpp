@@ -11,6 +11,10 @@
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+#include <vector>
+
+#include "../../audio_engine/src/main/cpp/usb_audio.h"
+#include "../../soxr/src/soxr.h"
 
 namespace audio {
 
@@ -148,6 +152,145 @@ double Capture::duration_seconds() const {
 }
 
 void Capture::run_capture() {
+    if (device_id_.rfind(L"LIBUSB:", 0) == 0) {
+        uint16_t vid = 0, pid = 0;
+        swscanf_s(device_id_.c_str(), L"LIBUSB:%hx:%hx", &vid, &pid);
+
+        auto fail = [&](const wchar_t * msg) {
+            thread_error_ = msg;
+            running_.store(false, std::memory_order_release);
+        };
+
+        UsbAudioDriver driver;
+        if (!driver.open(vid, pid)) {
+            fail(L"No se pudo abrir el dispositivo USB DAC.");
+            return;
+        }
+
+        if (!driver.parseDescriptors()) {
+            fail(L"Fallo al leer los descriptores del USB DAC.");
+            return;
+        }
+
+        auto tuples = driver.getCaptureFormatTuples();
+        if (tuples.empty()) {
+            fail(L"El dispositivo USB DAC no reporta formatos de captura.");
+            return;
+        }
+
+        int dev_rate = tuples[0], dev_ch = tuples[1], dev_bits = tuples[2];
+        for (size_t i = 0; i < tuples.size(); i += 3) {
+            if (tuples[i] == 16000 && tuples[i+1] == 1 && tuples[i+2] == 16) {
+                dev_rate = 16000; dev_ch = 1; dev_bits = 16; break;
+            }
+        }
+
+        if (!driver.configureCapture(dev_rate, dev_ch, dev_bits)) {
+            fail(L"El dispositivo USB DAC no aceptó la configuración de captura.");
+            return;
+        }
+
+        if (!driver.startCapture()) {
+            fail(L"No se pudo iniciar la captura en el USB DAC.");
+            return;
+        }
+
+        soxr_error_t sox_err = nullptr;
+        soxr_t resampler = nullptr;
+        if (dev_rate != kTargetSampleRate) {
+            soxr_io_spec_t io_spec = soxr_io_spec(SOXR_FLOAT32_I, SOXR_FLOAT32_I);
+            soxr_quality_spec_t q_spec = soxr_quality_spec(SOXR_HQ, 0);
+            resampler = soxr_create(dev_rate, kTargetSampleRate, 1, &sox_err, &io_spec, &q_spec, nullptr);
+            if (sox_err) {
+                fail(L"Error al inicializar el resampler (soxr).");
+                return;
+            }
+        }
+
+        const int buf_bytes = 4096;
+        std::vector<uint8_t> read_buf(buf_bytes);
+        std::vector<float> float_buf;
+
+        while (!stop_flag_.load(std::memory_order_acquire)) {
+            int bytes_read = driver.readCapture(read_buf.data(), buf_bytes);
+            if (bytes_read < 0) {
+                abort_reason_ = L"Error al leer del USB DAC.";
+                break;
+            }
+
+            if (bytes_read == 0) {
+                Sleep(10);
+                continue;
+            }
+
+            int bytes_per_sample = driver.getConfiguredCaptureSubslotSize();
+            if (bytes_per_sample == 0) bytes_per_sample = dev_bits / 8;
+            int num_frames = bytes_read / (bytes_per_sample * dev_ch);
+            
+            float_buf.resize(num_frames);
+            
+            for (int i = 0; i < num_frames; ++i) {
+                float sum = 0.0f;
+                for (int c = 0; c < dev_ch; ++c) {
+                    const uint8_t* ptr = &read_buf[(i * dev_ch + c) * bytes_per_sample];
+                    float val = 0.0f;
+                    if (bytes_per_sample == 2) {
+                        int16_t v = *reinterpret_cast<const int16_t*>(ptr);
+                        val = v / 32768.0f;
+                    } else if (bytes_per_sample == 3) {
+                        int32_t v = (ptr[0]) | (ptr[1] << 8) | ((int8_t)ptr[2] << 16);
+                        val = v / 8388608.0f;
+                    } else if (bytes_per_sample == 4) {
+                        int32_t v = *reinterpret_cast<const int32_t*>(ptr);
+                        val = v / 2147483648.0f;
+                    }
+                    sum += val;
+                }
+                float_buf[i] = sum / dev_ch;
+            }
+
+            if (resampler) {
+                size_t idone = 0, odone = 0;
+                std::vector<float> out_buf(num_frames * kTargetSampleRate / dev_rate + 100);
+                soxr_process(resampler, float_buf.data(), float_buf.size(), &idone, out_buf.data(), out_buf.size(), &odone);
+                
+                const size_t old_size = buffer_->size();
+                buffer_->resize(old_size + odone);
+                float * dst = buffer_->data() + old_size;
+                
+                float peak = 0.0f;
+                for (size_t i = 0; i < odone; ++i) {
+                    dst[i] = out_buf[i];
+                    float abs_v = std::fabs(dst[i]);
+                    if (abs_v > peak) peak = abs_v;
+                }
+                g_peak.store(peak, std::memory_order_release);
+            } else {
+                const size_t old_size = buffer_->size();
+                buffer_->resize(old_size + num_frames);
+                float * dst = buffer_->data() + old_size;
+                
+                float peak = 0.0f;
+                for (int i = 0; i < num_frames; ++i) {
+                    dst[i] = float_buf[i];
+                    float abs_v = std::fabs(dst[i]);
+                    if (abs_v > peak) peak = abs_v;
+                }
+                g_peak.store(peak, std::memory_order_release);
+            }
+        }
+
+        if (resampler) {
+            soxr_delete(resampler);
+        }
+
+        driver.stopCapture();
+        driver.close();
+        g_peak.store(0.0f);
+        running_.store(false, std::memory_order_release);
+        return;
+    }
+
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool com_initialized = SUCCEEDED(hr);
 

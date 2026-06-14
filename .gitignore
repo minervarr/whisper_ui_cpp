@@ -1,10 +1,64 @@
-# Build output
+# Build and configuration directories
 build/
+build-*/
+out/
+bin/
+obj/
+*.dir/
 
-# Whisper model weights (large binaries — download separately)
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# Visual Studio & Windows specific
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.res
+*.aps
+*.ncb
+*.opendb
+*.sdf
+*.opensdf
+*.ipch
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.a
+*.o
+*.obj
+
+# Whisper model weights and data
 *.bin
 *.gguf
 models/
 
 # Old whisper.cpp source copy (replaced by submodule)
 whisper.cpp-master/
+
+# Logs and debug files
+*.log
+audio_engine.log
+
+# OS generated files
+.DS_Store
+Thumbs.db

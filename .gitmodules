@@ -1,3 +1,9 @@
 [submodule "whisper.cpp"]
 	path = whisper.cpp
 	url = https://github.com/ggml-org/whisper.cpp.git
+[submodule "audio_engine"]
+	path = audio_engine
+	url = https://github.com/minervarr/audio_engine
+[submodule "soxr"]
+	path = soxr
+	url = https://github.com/chirlu/soxr
