@@ -8,6 +8,7 @@
 #include "audio/file_reader.h"
 #include "inference/model_loader.h"
 #include "inference/transcribe.h"
+#include "inference/output_format.h"
 #include "ui/result_dialog.h"
 #include "ui/settings_dlg.h"
 #include "ui/language_combo.h"
@@ -40,6 +41,17 @@ bool g_is_transcribing = false;
 inference::LoadState g_last_load_state = inference::LoadState::NotStarted;
 std::shared_ptr<std::vector<float>> g_audio;  // mantiene el buffer vivo para reintentos (Fase 9)
 std::wstring g_mic_fallback_msg;  // status diferido si el mic guardado no estaba disponible al arrancar
+
+// --- Transcripción por lotes (varios archivos arrastrados de una vez) ---
+// Cada archivo se transcribe uno por uno y su texto se guarda como <audio>.txt
+// junto al original; no se abre el diálogo de resultado en modo tanda.
+std::vector<std::wstring> g_batch_files;     // rutas de la tanda (pendientes + en curso)
+size_t       g_batch_index   = 0;            // índice del archivo en curso
+size_t       g_batch_total   = 0;            // total de la tanda
+size_t       g_batch_ok      = 0;            // transcritos con éxito
+size_t       g_batch_failed  = 0;            // fallidos (carga o transcripción)
+bool         g_batch_mode    = false;        // true mientras corre una tanda de >1 archivo
+std::wstring g_batch_current_path;           // archivo que se transcribe ahora mismo
 
 void init_main_language_combo(HWND hdlg) {
     HWND combo = GetDlgItem(hdlg, IDC_LANG);
@@ -323,7 +335,91 @@ void start_retranscribe(HWND hdlg, const cfg::Settings & s, const wchar_t * stat
     inference::transcribe_async(g_model.context(), g_audio, s, hdlg);
 }
 
+// Ruta de salida del texto: misma carpeta y nombre que el audio, con .txt.
+std::wstring transcript_path_for(const std::wstring & audio_path) {
+    size_t slash = audio_path.find_last_of(L"\\/");
+    size_t dot   = audio_path.find_last_of(L'.');
+    if (dot != std::wstring::npos && (slash == std::wstring::npos || dot > slash))
+        return audio_path.substr(0, dot) + L".txt";
+    return audio_path + L".txt";
+}
+
+// Escribe texto UTF-8 a disco (sobrescribe). Devuelve true si se guardó entero.
+bool write_utf8_file(const std::wstring & path, const std::string & utf8) {
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    bool ok = utf8.empty() ||
+              (WriteFile(h, utf8.data(), (DWORD)utf8.size(), &written, nullptr) &&
+               written == (DWORD)utf8.size());
+    CloseHandle(h);
+    return ok;
+}
+
+// Arranca (o continúa) la tanda: toma el archivo en g_batch_index, carga su
+// audio y lanza la transcripción asíncrona. Un archivo que no cargue se cuenta
+// como fallo y se salta. Cuando no quedan archivos, cierra la tanda.
+void start_next_batch_file(HWND hdlg) {
+    while (g_batch_index < g_batch_files.size()) {
+        const std::wstring & path = g_batch_files[g_batch_index];
+        g_batch_current_path = path;
+
+        std::wstring load_err;
+        auto buf = audio::load_audio_file(path.c_str(), &load_err);
+        if (!buf || buf->empty()) {
+            ++g_batch_failed;
+            ++g_batch_index;
+            continue;  // salta al siguiente archivo
+        }
+
+        g_audio = buf;
+        g_is_transcribing = true;
+
+        size_t s = path.find_last_of(L"\\/");
+        std::wstring name = (s == std::wstring::npos) ? path : path.substr(s + 1);
+        wchar_t status[600];
+        swprintf(status, 600, L"Transcribiendo (%zu/%zu): %s",
+                 g_batch_index + 1, g_batch_total, name.c_str());
+        SetDlgItemTextW(hdlg, IDC_STATUS, status);
+        SetDlgItemTextW(hdlg, IDC_TRANSCRIPT, L"Procesando audio con whisper.cpp…");
+        led_set_state(GetDlgItem(hdlg, IDC_LED), LedState::Processing);
+
+        sync_settings_language_from_combo(hdlg);
+        inference::transcribe_async(g_model.context(), g_audio, g_settings, hdlg);
+        return;  // esperamos WM_TRANSCRIBE_DONE para continuar con el siguiente
+    }
+
+    // Sin archivos restantes: fin de la tanda.
+    g_batch_mode = false;
+    g_is_transcribing = false;
+    EnableWindow(GetDlgItem(hdlg, IDC_REC), TRUE);
+    led_set_state(GetDlgItem(hdlg, IDC_LED), LedState::Ready);
+    wchar_t done[256];
+    swprintf(done, 256, L"Tanda completada: %zu transcritos, %zu con error.",
+             g_batch_ok, g_batch_failed);
+    SetDlgItemTextW(hdlg, IDC_STATUS, done);
+    SetDlgItemTextW(hdlg, IDC_TRANSCRIPT, done);
+    g_batch_files.clear();
+}
+
 void on_transcribe_done(HWND hdlg, bool ok, inference::Result * result) {
+    // Modo tanda: guardar el texto junto al audio y pasar al siguiente archivo
+    // sin abrir el diálogo de resultado (transcripción desatendida).
+    if (g_batch_mode) {
+        if (result && ok && result->error.empty()) {
+            std::wstring out = transcript_path_for(g_batch_current_path);
+            if (write_utf8_file(out, inference::format_txt(*result))) ++g_batch_ok;
+            else                                                      ++g_batch_failed;
+        } else {
+            ++g_batch_failed;
+        }
+        delete result;
+        ++g_batch_index;
+        start_next_batch_file(hdlg);  // siguiente archivo o cierre de la tanda
+        return;
+    }
+
     g_is_transcribing = false;
     EnableWindow(GetDlgItem(hdlg, IDC_REC), TRUE);
     led_set_state(GetDlgItem(hdlg, IDC_LED), LedState::Ready);
@@ -499,37 +595,65 @@ INT_PTR CALLBACK DialogProc(HWND hdlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_DROPFILES: {
             HDROP hdrop = reinterpret_cast<HDROP>(wParam);
-            wchar_t path[MAX_PATH] = {};
-            DragQueryFileW(hdrop, 0, path, MAX_PATH);
+
+            if (g_is_recording || g_is_transcribing || !g_model.context()) {
+                DragFinish(hdrop);
+                return TRUE;
+            }
+
+            // Reúne TODOS los archivos soltados que tengan extensión compatible,
+            // conservando el orden en que Windows los entrega.
+            UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
+            std::vector<std::wstring> files;
+            for (UINT i = 0; i < count; ++i) {
+                wchar_t path[MAX_PATH] = {};
+                if (DragQueryFileW(hdrop, i, path, MAX_PATH) &&
+                    audio::is_supported_audio_extension(path)) {
+                    files.emplace_back(path);
+                }
+            }
             DragFinish(hdrop);
 
-            if (g_is_recording || g_is_transcribing || !g_model.context()) return TRUE;
-
-            if (!audio::is_supported_audio_extension(path)) {
+            if (files.empty()) {
                 SetDlgItemTextW(hdlg, IDC_STATUS,
-                    L"Formato no compatible. Usa WAV, MP3, M4A, FLAC…");
+                    L"Ningún archivo compatible. Usa WAV, MP3, M4A, FLAC…");
                 return TRUE;
             }
 
-            SetDlgItemTextW(hdlg, IDC_STATUS, L"Cargando archivo de audio…");
-            led_set_state(GetDlgItem(hdlg, IDC_LED), LedState::Processing);
             EnableWindow(GetDlgItem(hdlg, IDC_REC), FALSE);
 
-            std::wstring load_err;
-            auto buf = audio::load_audio_file(path, &load_err);
-            if (!buf || buf->empty()) {
-                SetDlgItemTextW(hdlg, IDC_STATUS, load_err.c_str());
-                led_set_state(GetDlgItem(hdlg, IDC_LED), LedState::Error);
-                EnableWindow(GetDlgItem(hdlg, IDC_REC), TRUE);
+            if (files.size() == 1) {
+                // Un solo archivo: comportamiento clásico con diálogo de resultado.
+                g_batch_mode = false;
+                SetDlgItemTextW(hdlg, IDC_STATUS, L"Cargando archivo de audio…");
+                led_set_state(GetDlgItem(hdlg, IDC_LED), LedState::Processing);
+
+                std::wstring load_err;
+                auto buf = audio::load_audio_file(files[0].c_str(), &load_err);
+                if (!buf || buf->empty()) {
+                    SetDlgItemTextW(hdlg, IDC_STATUS, load_err.c_str());
+                    led_set_state(GetDlgItem(hdlg, IDC_LED), LedState::Error);
+                    EnableWindow(GetDlgItem(hdlg, IDC_REC), TRUE);
+                    return TRUE;
+                }
+
+                g_audio = buf;
+                g_is_transcribing = true;
+                SetDlgItemTextW(hdlg, IDC_STATUS, L"Transcribiendo archivo…");
+                SetDlgItemTextW(hdlg, IDC_TRANSCRIPT, L"Procesando audio con whisper.cpp…");
+                sync_settings_language_from_combo(hdlg);
+                inference::transcribe_async(g_model.context(), g_audio, g_settings, hdlg);
                 return TRUE;
             }
 
-            g_audio = buf;
-            g_is_transcribing = true;
-            SetDlgItemTextW(hdlg, IDC_STATUS, L"Transcribiendo archivo…");
-            SetDlgItemTextW(hdlg, IDC_TRANSCRIPT, L"Procesando audio con whisper.cpp…");
-            sync_settings_language_from_combo(hdlg);
-            inference::transcribe_async(g_model.context(), g_audio, g_settings, hdlg);
+            // Varios archivos: transcripción por lotes, un .txt junto a cada audio.
+            g_batch_files  = std::move(files);
+            g_batch_total  = g_batch_files.size();
+            g_batch_index  = 0;
+            g_batch_ok     = 0;
+            g_batch_failed = 0;
+            g_batch_mode   = true;
+            start_next_batch_file(hdlg);
             return TRUE;
         }
 
