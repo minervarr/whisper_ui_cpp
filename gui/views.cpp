@@ -32,6 +32,39 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
 
     c.clear(pal::bg);
 
+    // ── modal popup: its own screen, nothing else drawn ────────────────────
+    // The engine composites winding geometry (triangles, curve text) in a
+    // fixed pass ON TOP of SDF rects (coverage.slang), so a panel can never
+    // reliably cover base UI by draw order. While a picker is open we simply
+    // don't draw the base screen — zero bleed by construction.
+    if (st.popup != DrawState::Popup::None && st.popup_items) {
+        const char * title = st.popup == DrawState::Popup::Lang
+                                 ? "Selecciona el idioma"
+                                 : "Selecciona el micrófono";
+        c.text(title, pad, pad, ts.title, pal::text);
+        c.text("ESC o clic fuera para cerrar", pad, pad + ts.title * 1.5f,
+               ts.small, pal::dim);
+
+        Rect area = popup_area(W, H);
+
+        // Pointer -> hovered item index, so the row under the cursor
+        // highlights live (no click needed).
+        int hover = -1;
+        const float row_h = popup_row_height(H);
+        if (area.contains(st.ptr.x, st.ptr.y)) {
+            int i = (int) ((st.ptr.y - area.y + st.popup_scroll) / row_h);
+            if (i >= 0 && i < (int) st.popup_items->size()) hover = i;
+        }
+
+        auto rows = widgets::drawScrollList(c, area, *st.popup_items,
+                                            st.popup_selected, st.popup_scroll,
+                                            row_h, hover);
+        for (const auto & row : rows)
+            hits.push_back({row.rect, ActPopupBase + row.index});
+        hits.push_back({{0, 0, W, H}, ActPopupClose});
+        return;
+    }
+
     const RecorderController & ctl = *st.ctl;
     float y = pad;
 
@@ -67,16 +100,15 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
     // ── language + microphone rows ─────────────────────────────────────────
     {
         const float rh = H * 0.062f;
-        const bool no_popup = st.popup == DrawState::Popup::None;
         Rect lang_row{ pad, y, W - 2 * pad, rh };
         widgets::drawDropdownField(c, lang_row, "Idioma", st.lang_label,
-                                   no_popup && lang_row.contains(st.ptr.x, st.ptr.y));
+                                   lang_row.contains(st.ptr.x, st.ptr.y));
         hits.push_back({lang_row, ActLangField});
         y += rh + pad * 0.5f;
 
         Rect mic_row{ pad, y, W - 2 * pad, rh };
         widgets::drawDropdownField(c, mic_row, "Micrófono", st.mic_label,
-                                   no_popup && mic_row.contains(st.ptr.x, st.ptr.y));
+                                   mic_row.contains(st.ptr.x, st.ptr.y));
         hits.push_back({mic_row, ActMicField});
         y += rh + pad;
     }
@@ -161,36 +193,6 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         }
     }
 
-    // ── popup (language / device picker) — drawn last, wins hit-tests ──────
-    if (st.popup != DrawState::Popup::None && st.popup_items) {
-        // Modal: only the popup's zones are clickable while it is open. Rows
-        // go before the full-screen close backdrop — the App takes the first
-        // hit in push order.
-        hits.clear();
-        Rect area = popup_area(W, H);
-
-        // Clean layer: cull ALL base-screen text (MSDF composites after
-        // geometry, so draw order alone can't hide it), then dim the whole
-        // base UI with a scrim before the panel goes on top.
-        c.occlude(0, 0, W, H);
-        c.rect(0, 0, W, H, with_alpha(pal::bg, 0.60f));
-
-        // Pointer -> hovered item index, so the row under the cursor
-        // highlights live (no click needed).
-        int hover = -1;
-        const float row_h = popup_row_height(H);
-        if (area.contains(st.ptr.x, st.ptr.y)) {
-            int i = (int) ((st.ptr.y - area.y + st.popup_scroll) / row_h);
-            if (i >= 0 && i < (int) st.popup_items->size()) hover = i;
-        }
-
-        auto rows = widgets::drawScrollList(c, area, *st.popup_items,
-                                            st.popup_selected, st.popup_scroll,
-                                            row_h, hover);
-        for (const auto & row : rows)
-            hits.push_back({row.rect, ActPopupBase + row.index});
-        hits.push_back({{0, 0, W, H}, ActPopupClose});
-    }
 }
 
 } // namespace gui
