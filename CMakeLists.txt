@@ -62,6 +62,11 @@ endif()
 # -----------------------------------------------------------------------------
 add_library(whisper_core STATIC
     core/settings.cpp
+    core/model_loader.cpp
+    core/transcribe.cpp
+    core/confidence.cpp
+    core/output_format.cpp
+    core/languages.cpp
 )
 
 target_include_directories(whisper_core PUBLIC
@@ -80,5 +85,7 @@ target_link_libraries(whisper_core PUBLIC
 add_executable(whisper_tests
     tests/test_main.cpp
     tests/settings_test.cpp
+    tests/output_format_test.cpp
+    tests/event_queue_test.cpp
 )
 target_link_libraries(whisper_tests PRIVATE whisper_core)
