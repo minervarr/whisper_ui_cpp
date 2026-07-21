@@ -121,3 +121,9 @@ add_executable(whisper_tests
     tests/file_reader_test.cpp
 )
 target_link_libraries(whisper_tests PRIVATE whisper_core)
+
+# -----------------------------------------------------------------------------
+# cli — headless end-to-end proof
+# -----------------------------------------------------------------------------
+add_executable(whisper_destilado_cli cli/main.cpp)
+target_link_libraries(whisper_destilado_cli PRIVATE whisper_core)
