@@ -1,9 +1,12 @@
 [submodule "whisper.cpp"]
-	path = whisper.cpp
+	path = third_party/whisper.cpp
 	url = https://github.com/ggml-org/whisper.cpp.git
 [submodule "audio_engine"]
-	path = audio_engine
+	path = first_party/audio_engine
 	url = https://github.com/minervarr/audio_engine
 [submodule "soxr"]
-	path = soxr
+	path = third_party/soxr
 	url = https://github.com/chirlu/soxr
+[submodule "framework/vk_canvas"]
+	path = framework/vk_canvas
+	url = https://github.com/minervarr/Vk_Canvas_Lb_LAW.git
