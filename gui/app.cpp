@@ -337,6 +337,7 @@ int App::run(bool selftest)
     std::vector<Hit>   hits;
     std::vector<float> curves;
     std::vector<float> msdf_quads;
+    float              last_px = -1.0f, last_py = -1.0f;
 
     while (running_) {
         // 16 ms while the timer/level dot are live; lazy 50 ms otherwise.
@@ -421,6 +422,13 @@ int App::run(bool selftest)
             dirty_ = true;
         }
         if (input.pointerDown || input.pointerWentUp) dirty_ = true;
+
+        // Pointer motion redraws so hover feedback tracks the cursor live.
+        if (input.pointerX != last_px || input.pointerY != last_py) {
+            last_px = input.pointerX;
+            last_py = input.pointerY;
+            dirty_ = true;
+        }
 
         if (!dirty_) continue;
         dirty_ = false;
