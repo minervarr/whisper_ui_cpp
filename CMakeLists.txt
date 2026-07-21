@@ -69,7 +69,18 @@ add_library(whisper_core STATIC
     core/languages.cpp
     core/audio/capture_convert.cpp
     core/audio/file_reader.cpp
+    core/audio/capture.cpp
+    core/audio/capture_usb.cpp
 )
+
+if (WIN32)
+    target_sources(whisper_core PRIVATE core/audio/capture_wasapi.cpp)
+else()
+    target_sources(whisper_core PRIVATE
+        core/audio/capture_alsa.cpp
+        core/audio/capture_jack.cpp
+    )
+endif()
 
 target_include_directories(whisper_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -81,6 +92,22 @@ target_link_libraries(whisper_core PUBLIC
     whisper
     soxr
 )
+
+if (WIN32)
+    target_link_libraries(whisper_core PUBLIC audio_engine_windows)
+else()
+    # audio_engine_* targets export their include dirs (usb_audio.h,
+    # alsa_capture.h, jack_capture.h) PUBLIC-ly.
+    target_link_libraries(whisper_core PUBLIC
+        audio_engine_linux
+        audio_engine_alsa
+    )
+    if (TARGET audio_engine_jack)
+        target_link_libraries(whisper_core PUBLIC audio_engine_jack)
+    else()
+        message(FATAL_ERROR "JACK2 backend required: install jack2 dev headers (never pipewire-jack)")
+    endif()
+endif()
 
 # -----------------------------------------------------------------------------
 # tests
