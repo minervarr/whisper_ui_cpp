@@ -170,7 +170,8 @@ vce_compile_slang(gui_shaders
 if (WIN32)
     set(_gui_host_sources
         gui/os/win32_host.cc
-        framework/vk_canvas/platform/windows/win32_platform.cc)
+        framework/vk_canvas/platform/windows/win32_platform.cc
+        resources/app.rc)
 else()
     add_subdirectory(framework/vk_canvas/platform/linux vk_canvas_wayland)
     set(_gui_host_sources gui/os/wayland_host.cc)
@@ -193,6 +194,9 @@ if (WIN32)
     target_link_libraries(whisper_destilado PRIVATE user32)
     if (MSVC)
         target_compile_options(whisper_destilado PRIVATE /utf-8)
+        # The manifest is embedded via resources/app.rc (resource id 1, type
+        # 24); stop link.exe auto-embedding a second one (CVT1100).
+        target_link_options(whisper_destilado PRIVATE /MANIFEST:NO)
     endif()
 else()
     target_link_libraries(whisper_destilado PRIVATE vk_canvas_wayland)
