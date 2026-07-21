@@ -58,7 +58,7 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
 
         auto rows = widgets::drawScrollList(c, area, *st.popup_items,
                                             st.popup_selected, st.popup_scroll,
-                                            row_h, hover);
+                                            row_h, hover, widgets::kTextFit);
         for (const auto & row : rows)
             hits.push_back({row.rect, ActPopupBase + row.index});
         hits.push_back({{0, 0, W, H}, ActPopupClose});
@@ -92,7 +92,7 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         }
         bool hover = r.contains(st.ptr.x, st.ptr.y);
         if (hover && ctl.state() == UiState::Ready) bg = pal::accent;
-        c.button(r.x, r.y, r.w, r.h, label, bg, pal::text, bh * 0.25f);
+        widgets::drawFitButton(c, r, label, bg, pal::text, bh * 0.25f);
         hits.push_back({r, ActRecord});
         y += bh + pad;
     }
@@ -102,13 +102,15 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         const float rh = H * 0.062f;
         Rect lang_row{ pad, y, W - 2 * pad, rh };
         widgets::drawDropdownField(c, lang_row, "Idioma", st.lang_label,
-                                   lang_row.contains(st.ptr.x, st.ptr.y));
+                                   lang_row.contains(st.ptr.x, st.ptr.y),
+                                   widgets::kTextFit);
         hits.push_back({lang_row, ActLangField});
         y += rh + pad * 0.5f;
 
         Rect mic_row{ pad, y, W - 2 * pad, rh };
         widgets::drawDropdownField(c, mic_row, "Micrófono", st.mic_label,
-                                   mic_row.contains(st.ptr.x, st.ptr.y));
+                                   mic_row.contains(st.ptr.x, st.ptr.y),
+                                   widgets::kTextFit);
         hits.push_back({mic_row, ActMicField});
         y += rh + pad;
     }
@@ -171,20 +173,23 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         hits.push_back({path, ActPathField});
 
         Rect save{ path.x + path.w + pad * 0.5f, y, W * 0.14f, rh };
-        c.button(save.x, save.y, save.w, save.h, "Guardar",
-                 has_result ? pal::accent : pal::track, pal::text, rh * 0.25f);
+        widgets::drawFitButton(c, save, "Guardar",
+                               has_result ? pal::accent : pal::track,
+                               pal::text, rh * 0.25f);
         if (has_result) hits.push_back({save, ActSave});
         y += rh + pad * 0.5f;
 
         // retry row + toast
         Rect rq{ pad, y, W * 0.34f, rh };
-        c.button(rq.x, rq.y, rq.w, rq.h, "Reintentar con más calidad",
-                 has_result ? pal::btnIdle : pal::track, pal::text, rh * 0.25f);
+        widgets::drawFitButton(c, rq, "Reintentar con más calidad",
+                               has_result ? pal::btnIdle : pal::track,
+                               pal::text, rh * 0.25f);
         if (has_result) hits.push_back({rq, ActRetryQuality});
 
         Rect rl{ rq.x + rq.w + pad * 0.5f, y, W * 0.34f, rh };
-        c.button(rl.x, rl.y, rl.w, rl.h, "Reintentar con este idioma",
-                 has_result ? pal::btnIdle : pal::track, pal::text, rh * 0.25f);
+        widgets::drawFitButton(c, rl, "Reintentar con este idioma",
+                               has_result ? pal::btnIdle : pal::track,
+                               pal::text, rh * 0.25f);
         if (has_result) hits.push_back({rl, ActRetryLang});
 
         if (!st.toast.empty()) {
