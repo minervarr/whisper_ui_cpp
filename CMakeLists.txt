@@ -94,7 +94,11 @@ target_link_libraries(whisper_core PUBLIC
 )
 
 if (WIN32)
-    target_link_libraries(whisper_core PUBLIC audio_engine_windows)
+    # WASAPI + COM device enumeration + MMCSS for the capture backend.
+    target_link_libraries(whisper_core PUBLIC
+        audio_engine_windows
+        ole32 propsys mmdevapi avrt uuid
+    )
 else()
     # audio_engine_* targets export their include dirs (usb_audio.h,
     # alsa_capture.h, jack_capture.h) PUBLIC-ly.
