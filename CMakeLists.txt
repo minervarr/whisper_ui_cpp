@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.22)
 project(whisper_destilado LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -10,14 +10,9 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 # -----------------------------------------------------------------------------
-# whisper.cpp dependency (git submodule at whisper.cpp/)
-#
-# Para actualizar: cd whisper.cpp && git pull && cd .. && git add whisper.cpp
-# Primera compilación tras un clone: build.bat ejecuta git submodule update --init
+# third_party/whisper.cpp — force options BEFORE add_subdirectory
+# (whisper.cpp defaults BUILD_SHARED_LIBS=ON on MSVC, which would produce DLLs)
 # -----------------------------------------------------------------------------
-
-# Force options BEFORE add_subdirectory — whisper.cpp defaults
-# BUILD_SHARED_LIBS=ON on MSVC, which generaría DLLs.
 set(BUILD_SHARED_LIBS       OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
@@ -25,74 +20,65 @@ set(WHISPER_BUILD_SERVER    OFF CACHE BOOL "" FORCE)
 set(GGML_VULKAN             ON  CACHE BOOL "" FORCE)
 set(GGML_AVX2               ON  CACHE BOOL "" FORCE)
 
-# Windows MAX_PATH workaround:
-# La subcompilación de vulkan-shaders-gen crea paths largos; ponemos el
-# binary-dir de whisper.cpp en un path corto bajo el perfil del usuario.
 if (WIN32)
+    # MAX_PATH workaround: vulkan-shaders-gen sub-build creates long paths;
+    # keep whisper.cpp's binary dir short, under the user profile.
     if (DEFINED ENV{USERPROFILE})
         set(_wd_short_base "$ENV{USERPROFILE}/wd_d")
     else()
         set(_wd_short_base "${CMAKE_BINARY_DIR}/d")
     endif()
-    add_subdirectory(whisper.cpp "${_wd_short_base}/w-build")
+    add_subdirectory(third_party/whisper.cpp "${_wd_short_base}/w-build")
 else()
-    add_subdirectory(whisper.cpp)
+    add_subdirectory(third_party/whisper.cpp)
 endif()
 
-# Include audio_engine
-add_subdirectory(audio_engine/src/main/cpp/windows)
-
-# Include soxr
-set(BUILD_TESTS OFF CACHE BOOL "Build soxr tests" FORCE)
+# -----------------------------------------------------------------------------
+# third_party/soxr
+# -----------------------------------------------------------------------------
+# soxr 0.1.3 declares cmake_minimum_required(2.8.x); CMake >= 4 refuses it
+# unless given a policy floor. third_party is read-only, so set it here.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+# soxr resolves its cmake modules via CMAKE_SOURCE_DIR (assumes top-level);
+# as a subproject that points here, so hand it the module path ourselves.
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/soxr/cmake/Modules)
+set(BUILD_TESTS    OFF CACHE BOOL "Build soxr tests" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "Build soxr examples" FORCE)
-set(WITH_OPENMP OFF CACHE BOOL "Build soxr with OpenMP" FORCE)
-add_subdirectory(soxr)
+set(WITH_OPENMP    OFF CACHE BOOL "Build soxr with OpenMP" FORCE)
+add_subdirectory(third_party/soxr)
 
-add_executable(whisper_destilado WIN32
-    src/main.cpp
-    src/window.cpp
-    src/led_control.cpp
-    src/config.cpp
-    src/audio/wasapi_capture.cpp
-    src/audio/device_enum.cpp
-    src/audio/device_notify.cpp
-    src/audio/file_reader.cpp
-    src/inference/model_loader.cpp
-    src/inference/transcribe.cpp
-    src/inference/confidence.cpp
-    src/inference/output_format.cpp
-    src/ui/result_dialog.cpp
-    src/ui/settings_dlg.cpp
-    src/ui/language_combo.cpp
-    src/ui/language_picker.cpp
-    src/ui/mic_picker.cpp
-    resources/app.rc
-)
-
-target_include_directories(whisper_destilado PRIVATE src)
-
-target_link_libraries(whisper_destilado PRIVATE
-    whisper          # ggml/ggml-vulkan/ggml-cpu vienen transitivos
-    audio_engine_windows
-    soxr
-    ole32 propsys mmdevapi avrt
-    comctl32 comdlg32 gdi32 user32 shell32 winmm advapi32 uuid
-    mfplat mfreadwrite mfuuid
-)
-
-if (MSVC)
-    target_compile_options(whisper_destilado PRIVATE /arch:AVX2 /O2 /EHsc /W4 /permissive- /utf-8)
-    target_compile_definitions(whisper_destilado PRIVATE
-        UNICODE _UNICODE
-        NOMINMAX
-        WIN32_LEAN_AND_MEAN
-        _CRT_SECURE_NO_WARNINGS
-    )
-    # The manifest is embedded via resources/app.rc (resource id 1, type 24).
-    # Disable CMake/link.exe auto-embedding a second manifest to avoid CVT1100 duplicate resource.
-    target_link_options(whisper_destilado PRIVATE /MANIFEST:NO)
+# -----------------------------------------------------------------------------
+# first_party/audio_engine — capture backends
+# -----------------------------------------------------------------------------
+if (WIN32)
+    add_subdirectory(first_party/audio_engine/scripts/windows ae_windows)
+else()
+    set(AUDIO_ENGINE_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(first_party/audio_engine/scripts/linux ae_linux)
 endif()
 
-set_target_properties(whisper_destilado PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+# -----------------------------------------------------------------------------
+# whisper_core — portable app core (zero UI deps)
+# -----------------------------------------------------------------------------
+add_library(whisper_core STATIC
+    core/settings.cpp
 )
+
+target_include_directories(whisper_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+target_link_libraries(whisper_core PUBLIC
+    whisper
+    soxr
+)
+
+# -----------------------------------------------------------------------------
+# tests
+# -----------------------------------------------------------------------------
+add_executable(whisper_tests
+    tests/test_main.cpp
+    tests/settings_test.cpp
+)
+target_link_libraries(whisper_tests PRIVATE whisper_core)
