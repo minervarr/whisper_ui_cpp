@@ -129,3 +129,75 @@ target_link_libraries(whisper_tests PRIVATE whisper_core)
 # -----------------------------------------------------------------------------
 add_executable(whisper_destilado_cli cli/main.cpp)
 target_link_libraries(whisper_destilado_cli PRIVATE whisper_core)
+
+# -----------------------------------------------------------------------------
+# gui — vk_canvas app (Wayland on Linux, Win32 on Windows)
+# -----------------------------------------------------------------------------
+# slangc for the engine's Slang->SPIR-V shader step. On this Linux setup the
+# compiler comes from the shader-slang-bin package.
+if (NOT WIN32 AND NOT DEFINED CACHE{VCE_SLANGC} AND EXISTS /opt/shader-slang-bin/bin/slangc)
+    set(VCE_SLANGC /opt/shader-slang-bin/bin/slangc CACHE FILEPATH "slangc")
+endif()
+
+add_subdirectory(framework/vk_canvas/core vk_canvas_core)
+
+include(framework/vk_canvas/cmake/VceShaders.cmake)
+vce_compile_slang(gui_shared_shaders
+    ${CMAKE_BINARY_DIR}/assets/shaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/framework/vk_canvas/first_party/vulkan_font_engine/shaders_src
+    composite_vert
+    composite_frag
+    tiling
+    coverage
+    msdf_vert
+    msdf_frag
+)
+vce_compile_slang(gui_shaders
+    ${CMAKE_BINARY_DIR}/assets/shaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/framework/vk_canvas/shaders_src
+    overlay_vert
+    overlay_frag
+    image_vert
+    image_frag
+    shape_vert
+    shape_frag
+)
+
+if (WIN32)
+    set(_gui_host_sources
+        gui/os/win32_host.cc
+        framework/vk_canvas/platform/windows/win32_platform.cc)
+else()
+    add_subdirectory(framework/vk_canvas/platform/linux vk_canvas_wayland)
+    set(_gui_host_sources gui/os/wayland_host.cc)
+endif()
+
+add_executable(whisper_destilado
+    gui/main.cc
+    gui/app.cpp
+    gui/views.cpp
+    gui/recorder_controller.cpp
+    ${_gui_host_sources}
+)
+add_dependencies(whisper_destilado gui_shared_shaders gui_shaders)
+
+target_link_libraries(whisper_destilado PRIVATE whisper_core vk_canvas_core)
+
+if (WIN32)
+    target_include_directories(whisper_destilado PRIVATE
+        framework/vk_canvas/platform/windows)
+    target_link_libraries(whisper_destilado PRIVATE user32)
+    if (MSVC)
+        target_compile_options(whisper_destilado PRIVATE /utf-8)
+    endif()
+else()
+    target_link_libraries(whisper_destilado PRIVATE vk_canvas_wayland)
+endif()
+
+# Fonts next to the exe (FileAssetReader reads <exe>/assets/), like shaders.
+add_custom_command(TARGET whisper_destilado POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NewCM10-Book.otf
+        ${CMAKE_BINARY_DIR}/assets/fonts/
+)

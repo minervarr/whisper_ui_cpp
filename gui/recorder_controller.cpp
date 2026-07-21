@@ -80,6 +80,14 @@ void RecorderController::on_capture_aborted(const std::string & reason)
     status_ = reason.empty() ? "La captura se interrumpió." : reason;
 }
 
+bool RecorderController::on_retry_started()
+{
+    if (state_ != UiState::Ready) return false;
+    state_  = UiState::Transcribing;
+    status_ = "Transcribiendo…";
+    return true;
+}
+
 void RecorderController::tick(int64_t now_ms, float peak)
 {
     now_ms_ = now_ms;

@@ -46,6 +46,10 @@ public:
     // Capture died mid-take (device unplugged, server gone...).
     void on_capture_aborted(const std::string & reason);
 
+    // A re-transcription of the last take was launched (Ready ->
+    // Transcribing). False when not Ready.
+    bool on_retry_started();
+
     // Once per frame: `now_ms` monotonic milliseconds, `peak` current
     // capture peak 0..1 (ignored outside Recording).
     void tick(int64_t now_ms, float peak);
