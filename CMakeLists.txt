@@ -67,11 +67,14 @@ add_library(whisper_core STATIC
     core/confidence.cpp
     core/output_format.cpp
     core/languages.cpp
+    core/audio/capture_convert.cpp
+    core/audio/file_reader.cpp
 )
 
 target_include_directories(whisper_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/soxr/src
 )
 
 target_link_libraries(whisper_core PUBLIC
@@ -87,5 +90,7 @@ add_executable(whisper_tests
     tests/settings_test.cpp
     tests/output_format_test.cpp
     tests/event_queue_test.cpp
+    tests/capture_convert_test.cpp
+    tests/file_reader_test.cpp
 )
 target_link_libraries(whisper_tests PRIVATE whisper_core)
