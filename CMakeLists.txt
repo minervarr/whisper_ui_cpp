@@ -119,6 +119,8 @@ add_executable(whisper_tests
     tests/event_queue_test.cpp
     tests/capture_convert_test.cpp
     tests/file_reader_test.cpp
+    tests/recorder_controller_test.cpp
+    gui/recorder_controller.cpp
 )
 target_link_libraries(whisper_tests PRIVATE whisper_core)
 
