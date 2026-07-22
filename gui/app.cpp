@@ -1,4 +1,5 @@
 #include "gui/app.h"
+#include "gui/fonts.h"
 #include "gui/host.hh"
 
 #include "canvas.hh"
@@ -26,42 +27,6 @@
 namespace gui {
 
 namespace {
-
-// ── fonts (curve font + cached MSDF atlas, scanersito pipeline) ─────────────
-
-Font     g_font;
-bool     g_font_ok = false;
-MsdfFont g_msdf;
-bool     g_msdf_ok = false;
-
-constexpr const char * kFontRegular = "fonts/NewCM10-Book.otf";
-
-void init_fonts(AssetReader & assets, const std::string & cache)
-{
-    std::vector<uint8_t> bytes;
-    if (assets.read(kFontRegular, bytes))
-        g_font_ok = g_font.loadFromMemory(bytes.data(), bytes.size());
-
-    if (g_msdf.generate(assets, kFontRegular, cache.c_str()))
-        g_msdf_ok = g_msdf.valid();
-    if (!g_msdf_ok)
-        std::fprintf(stderr, "[!] MSDF unavailable — curve text only\n");
-}
-
-void upload_msdf(Renderer & r, const std::string & cache)
-{
-    if (!g_msdf_ok) return;
-    g_msdf.ensureAtlasLoaded(cache.c_str());
-    r.initMsdf(g_msdf);
-    g_msdf.releaseAtlasPixels();
-}
-
-std::string msdf_cache_path()
-{
-    std::string cfg = cfg::config_path();          // ensures the dir exists
-    if (cfg.empty()) return "msdf.cache";
-    return std::filesystem::path(cfg).parent_path().string() + "/msdf.cache";
-}
 
 int64_t now_ms()
 {
@@ -435,12 +400,8 @@ int App::run(bool selftest)
 
         st_.ptr = { input.pointerX, input.pointerY, input.pointerDown };
 
-        curves.clear();
-        msdf_quads.clear();
         Renderer * r = host->renderer();
-        Canvas c(curves, r->width(), r->height(),
-                 g_font_ok ? &g_font : nullptr, 0, 0, 0, 0);
-        if (g_msdf_ok) c.useMsdf(&g_msdf, &msdf_quads);
+        Canvas c = make_canvas(curves, msdf_quads, r->width(), r->height());
         draw_main(c, st_, hits);
         r->draw(curves, 0, {}, {}, msdf_quads);
     }

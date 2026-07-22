@@ -177,16 +177,24 @@ else()
     set(_gui_host_sources gui/os/wayland_host.cc)
 endif()
 
+# Shared GUI drawing code — the pure views/controller/fonts, no window, no
+# frame loop. Both the live app and the debug UI-capture tool link this, so
+# neither can drift from the other's rendering.
+add_library(whisper_gui_lib STATIC
+    gui/views.cpp
+    gui/recorder_controller.cpp
+    gui/fonts.cpp
+)
+target_link_libraries(whisper_gui_lib PUBLIC whisper_core vk_canvas_core)
+
 add_executable(whisper_destilado
     gui/main.cc
     gui/app.cpp
-    gui/views.cpp
-    gui/recorder_controller.cpp
     ${_gui_host_sources}
 )
 add_dependencies(whisper_destilado gui_shared_shaders gui_shaders)
 
-target_link_libraries(whisper_destilado PRIVATE whisper_core vk_canvas_core)
+target_link_libraries(whisper_destilado PRIVATE whisper_gui_lib)
 
 if (WIN32)
     target_include_directories(whisper_destilado PRIVATE
@@ -209,3 +217,26 @@ add_custom_command(TARGET whisper_destilado POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NewCM10-Book.otf
         ${CMAKE_BINARY_DIR}/assets/fonts/
 )
+
+# -----------------------------------------------------------------------------
+# whisper_ui_capture — headless PNG snapshots of every UI state (DEBUG ONLY).
+# Not present in Release builds (like scanersito's two_window_spike). Reads the
+# same assets/ dir (shaders + font) the app does, so it needs them built first.
+# -----------------------------------------------------------------------------
+if (NOT WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_subdirectory(framework/vk_canvas/core/capture vk_canvas_capture)
+
+    add_executable(whisper_ui_capture tools/ui_capture/main.cc)
+    add_dependencies(whisper_ui_capture gui_shared_shaders gui_shaders)
+    target_link_libraries(whisper_ui_capture PRIVATE
+        whisper_gui_lib vk_canvas_capture vk_canvas_wayland)
+
+    # Font next to this exe too (same assets/ dir as the app, but make the
+    # capture tool self-sufficient when built alone).
+    add_custom_command(TARGET whisper_ui_capture POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/fonts
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NewCM10-Book.otf
+            ${CMAKE_BINARY_DIR}/assets/fonts/
+    )
+endif()
