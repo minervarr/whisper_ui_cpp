@@ -145,6 +145,15 @@ void App::save_result()
     st_.toast = f ? ("Guardado: " + path) : ("Error al escribir: " + path);
 }
 
+void App::copy_result()
+{
+    if (!host_) return;
+    std::string text = ctl_.transcript_preview();   // plain, LF-joined, no timestamps
+    if (text.empty()) return;
+    host_->copy_text(text);
+    st_.toast = "Copiado al portapapeles";
+}
+
 void App::select_language(int index)
 {
     const auto & langs = languages::all();
@@ -219,6 +228,7 @@ void App::handle_hit(int action)
         }
         case ActPathField:      st_.path_focused = true; break;
         case ActSave:           save_result(); break;
+        case ActCopy:           copy_result(); break;
         case ActRetryQuality:   retranscribe(true);  break;
         case ActRetryLang:      retranscribe(false); break;
         default: break;
@@ -290,6 +300,7 @@ int App::run(bool selftest)
         std::fprintf(stderr, "[x] window creation failed\n");
         return 1;
     }
+    host_ = host.get();   // for clipboard access from handle_hit
 
     const std::string cache = msdf_cache_path();
     init_fonts(host->assets(), cache);

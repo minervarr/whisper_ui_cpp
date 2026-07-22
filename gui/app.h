@@ -15,6 +15,8 @@
 
 namespace gui {
 
+class AppHost;
+
 class App {
 public:
     // Returns the process exit code. `selftest` runs the headless leg
@@ -27,6 +29,7 @@ private:
     void stop_and_transcribe();
     void retranscribe(bool quality);      // same RAM buffer, new params
     void save_result();
+    void copy_result();
     void select_device(int index);
     void select_language(int index);
     void handle_hit(int action);
@@ -34,6 +37,7 @@ private:
 
     int run_selftest();
 
+    AppHost *                           host_ = nullptr;   // owned in run()
     cfg::Settings                       settings_;
     inference::ModelLoader              loader_;
     RecorderController                  ctl_;

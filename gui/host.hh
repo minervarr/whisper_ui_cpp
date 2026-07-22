@@ -14,6 +14,7 @@
 #include "renderer.hh"
 
 #include <memory>
+#include <string>
 
 namespace gui {
 
@@ -37,6 +38,9 @@ public:
 
     // True once when the window system wants a repaint (resize/expose).
     virtual bool take_dirty() = 0;
+
+    // Put UTF-8 text on the system clipboard.
+    virtual void copy_text(const std::string & utf8) = 0;
 };
 
 std::unique_ptr<AppHost> make_host();   // defined by the platform skin in os/

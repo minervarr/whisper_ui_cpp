@@ -56,6 +56,11 @@ public:
     bool quit_requested() override { return quit_; }
     bool take_dirty() override { bool d = dirty_; dirty_ = false; return d; }
 
+    void copy_text(const std::string & utf8) override
+    {
+        display_->set_clipboard_text(utf8);
+    }
+
 private:
     FileAssetReader assets_;
     std::unique_ptr<WaylandDisplay>         display_;

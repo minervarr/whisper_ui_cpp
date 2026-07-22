@@ -18,6 +18,7 @@ enum Action {
     ActLangField,       // open the language popup
     ActMicField,        // open the capture-device popup
     ActSave,
+    ActCopy,            // copy the plain transcript to the clipboard
     ActRetryQuality,    // re-transcribe the same take with the quality preset
     ActRetryLang,       // re-transcribe with the currently selected language
     ActPathField,       // focus the save-path text field

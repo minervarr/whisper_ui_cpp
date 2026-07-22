@@ -161,8 +161,11 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
             hits.push_back({widgets::segmentRectAt(seg, kFormatCount, i),
                             ActFormatBase + i});
 
+        // Two export buttons (Guardar + Copiar) share the right side; the
+        // path field takes the rest.
+        const float btn_w = W * 0.12f;
         Rect path{ seg.x + seg.w + pad * 0.5f, y,
-                   W - seg.w - 3.5f * pad - W * 0.14f, rh };
+                   W - seg.w - 4.0f * pad - 2.0f * btn_w, rh };
         c.rect(path.x, path.y, path.w, path.h,
                st.path_focused ? pal::panel2 : pal::panel, rh * 0.2f);
         std::string shown = truncateToWidth(c, st.save_path, path.w - pad,
@@ -172,11 +175,17 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
                ts.small, pal::text);
         hits.push_back({path, ActPathField});
 
-        Rect save{ path.x + path.w + pad * 0.5f, y, W * 0.14f, rh };
+        Rect save{ path.x + path.w + pad * 0.5f, y, btn_w, rh };
         widgets::drawFitButton(c, save, "Guardar",
                                has_result ? pal::accent : pal::track,
                                pal::text, rh * 0.25f);
         if (has_result) hits.push_back({save, ActSave});
+
+        Rect copy{ save.x + save.w + pad * 0.5f, y, btn_w, rh };
+        widgets::drawFitButton(c, copy, "Copiar",
+                               has_result ? pal::btnIdle : pal::track,
+                               pal::text, rh * 0.25f);
+        if (has_result) hits.push_back({copy, ActCopy});
         y += rh + pad * 0.5f;
 
         // retry row + toast

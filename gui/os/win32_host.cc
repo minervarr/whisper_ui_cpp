@@ -89,6 +89,24 @@ public:
     bool quit_requested() override { return g_quit; }
     bool take_dirty() override { bool d = g_dirty; g_dirty = false; return d; }
 
+    void copy_text(const std::string & utf8) override
+    {
+        if (!OpenClipboard(g_hwnd)) return;
+        EmptyClipboard();
+        // UTF-8 -> UTF-16 into a movable global for CF_UNICODETEXT.
+        int wn = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+        if (wn > 0) {
+            HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T) wn * sizeof(wchar_t));
+            if (h) {
+                wchar_t * dst = (wchar_t *) GlobalLock(h);
+                MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, dst, wn);
+                GlobalUnlock(h);
+                SetClipboardData(CF_UNICODETEXT, h);   // clipboard owns h now
+            }
+        }
+        CloseClipboard();
+    }
+
 private:
     FileAssetReader assets_;
     std::unique_ptr<Win32SurfaceProvider> surface_;
