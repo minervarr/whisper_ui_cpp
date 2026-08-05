@@ -6,6 +6,12 @@ bin/
 obj/
 *.dir/
 
+# Packaged output (scripts/linux/build.sh --share / --packages). This is also
+# where makepkg's SRCDEST/BUILDDIR are pointed (build/packaging/, already
+# covered by build/ above) — the actual .pkg.tar.zst / .tar.gz files land
+# here, never in the tree.
+dist/
+
 # CMake
 CMakeCache.txt
 CMakeFiles/

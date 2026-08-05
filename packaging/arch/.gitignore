@@ -1,0 +1,22 @@
+# makepkg's working files. The PKGBUILD and its companions are tracked;
+# nothing makepkg produces is.
+#
+# scripts/linux/build.sh --packages exports SRCDEST/BUILDDIR/PKGDEST so none
+# of this lands here in the first place — build/ and dist/ are ignored
+# wholesale at the repo root, which is a far stronger guarantee than the
+# patterns below. These exist for the case where makepkg is run BY HAND from
+# this directory, where its defaults put everything in $startdir, i.e. right
+# here.
+#
+# A `git+https://` source makes makepkg keep a BARE CLONE of the whole
+# repository next to the PKGBUILD, named after the source (whisper_player) —
+# tens of MB that has no business being committed. See Matrix_Player's
+# packaging/arch/README.md for the incident this pattern is copied from.
+whisper_player/
+src/
+pkg/
+*.pkg.tar.zst
+*.pkg.tar.zst.sig
+*.tar.bz2
+*.tar.gz
+*.tar.xz

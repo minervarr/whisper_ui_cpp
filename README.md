@@ -22,9 +22,18 @@ scripts\windows\build.bat       # -> build\windows\
 
 ## Model
 
-Put one whisper model (`.bin` or `.gguf`, e.g. `ggml-large-v3.bin`) into
-`models/` next to the executable (`build/linux/models/`). First one in
+Default: put one whisper model (`.bin` or `.gguf`, e.g. `ggml-large-v3.bin`)
+into `models/` next to the executable (`build/linux/models/`). First one in
 alphabetical order wins.
+
+To keep models somewhere else instead (e.g. a package install where
+`<exe_dir>/models` is root-owned, or just a shared `~/Models` folder), set
+one of these before starting the app — checked in this order, both bypass
+`<exe_dir>/models` entirely:
+
+- `WHISPER_MODEL_PATH=/path/to/exact-model.bin` — use exactly this file.
+- `WHISPER_MODEL_DIR=/path/to/folder` — scan this folder instead (same
+  alphabetical-first rule).
 
 ## Binaries
 

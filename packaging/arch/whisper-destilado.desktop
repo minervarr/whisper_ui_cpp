@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Whisper Destilado
+Comment=Local voice transcription (whisper.cpp, Vulkan UI)
+Exec=whisper_destilado
+Icon=whisper-destilado
+Categories=AudioVideo;Audio;Utility;
+Terminal=false

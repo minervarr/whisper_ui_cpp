@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -57,11 +58,33 @@ std::filesystem::path pick_model(const std::filesystem::path & models_dir) {
     return candidates.front();
 }
 
+// Where to look for a model, in priority order:
+//   1. WHISPER_MODEL_PATH  -- exact file, no scanning (picks *which* model)
+//   2. WHISPER_MODEL_DIR   -- a directory to scan instead of <exe_dir>/models
+//                             (picks *where*; still first .bin/.gguf
+//                             alphabetically within it)
+//   3. <exe_dir>/models    -- the default, unchanged
+// Exists so a model can live anywhere the user owns (e.g. ~/Models) instead
+// of requiring a package install location like /opt to be writable.
+std::filesystem::path resolve_model(std::filesystem::path & dir_out) {
+    if (const char * p = std::getenv("WHISPER_MODEL_PATH"); p && *p) {
+        std::filesystem::path path(p);
+        dir_out = path.parent_path();
+        return path;
+    }
+    if (const char * d = std::getenv("WHISPER_MODEL_DIR"); d && *d) {
+        dir_out = std::filesystem::path(d);
+    } else {
+        dir_out = exe_dir() / "models";
+    }
+    return pick_model(dir_out);
+}
+
 } // namespace
 
 ModelLoader::ModelLoader() {
-    auto dir = exe_dir() / "models";
-    auto picked = pick_model(dir);
+    std::filesystem::path dir;
+    auto picked = resolve_model(dir);
     if (!picked.empty()) {
         model_path_     = picked.string();
         model_filename_ = picked.filename().string();
@@ -88,8 +111,8 @@ void ModelLoader::worker(core::EventQueue * queue) {
     // If no model was found at construction, rescan in case the user dropped
     // one in afterwards (rare but cheap).
     if (model_filename_.empty()) {
-        auto dir = exe_dir() / "models";
-        auto picked = pick_model(dir);
+        std::filesystem::path dir;
+        auto picked = resolve_model(dir);
         if (!picked.empty()) {
             model_path_     = picked.string();
             model_filename_ = picked.filename().string();
@@ -101,8 +124,9 @@ void ModelLoader::worker(core::EventQueue * queue) {
                    + model_path_
                    + "\n\nColoca un archivo .bin o .gguf de whisper "
                      "(por ejemplo ggml-large-v3.bin, ggml-medium.bin, "
-                     "ggml-base.en.bin, etc.) dentro de la carpeta 'models' "
-                     "junto al ejecutable.";
+                     "ggml-base.en.bin, etc.) ahí, o define WHISPER_MODEL_DIR "
+                     "(carpeta) o WHISPER_MODEL_PATH (archivo exacto) antes "
+                     "de arrancar el programa.";
         state_.store(LoadState::Failed, std::memory_order_release);
         queue->push({core::AppEvent::ModelFailed, nullptr});
         return;

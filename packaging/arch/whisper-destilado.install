@@ -1,0 +1,17 @@
+post_install() {
+    cat <<'EOF'
+==> whisper_destilado is installed at /opt/whisper_destilado/.
+==> It needs a whisper model (.bin or .gguf). Point it at one you own,
+    no sudo needed -- add to your shell profile (e.g. ~/.bashrc):
+        export WHISPER_MODEL_DIR=~/Models/whisper
+    or export WHISPER_MODEL_PATH=/exact/path/to/model.bin for one specific
+    file. Either is checked before /opt/whisper_destilado/models/, which
+    stays as the no-config fallback (needs sudo to populate):
+        sudo cp ggml-large-v3-turbo.bin /opt/whisper_destilado/models/
+    Models: https://huggingface.co/ggerganov/whisper.cpp/tree/main
+EOF
+}
+
+post_upgrade() {
+    post_install
+}

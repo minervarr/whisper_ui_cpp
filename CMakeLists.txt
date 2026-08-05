@@ -18,7 +18,60 @@ set(WHISPER_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_SERVER    OFF CACHE BOOL "" FORCE)
 set(GGML_VULKAN             ON  CACHE BOOL "" FORCE)
-set(GGML_AVX2               ON  CACHE BOOL "" FORCE)
+
+# -----------------------------------------------------------------------------
+# WHISPER_ARCH_LEVEL -- x86-64 microarch level for ggml's CPU kernels (mel
+# spectrogram, resampling, and any op without a Vulkan path; GPU inference
+# itself is unaffected since that runs through GGML_VULKAN above).
+#   ""          -- default: same as "v3" below (this is what the project has
+#                  always shipped; kept as the unset default so a plain
+#                  `cmake -S . -B build` behaves exactly as before).
+#   "universal" -- true x86-64 baseline (SSE2 only), runs on any 64-bit x86 CPU.
+#   "v3"        -- AVX2/BMI2/FMA/F16C (Haswell 2013+, Zen 2+).
+#   "v4"        -- v3 plus AVX-512F (Skylake-X/Ice Lake+, Zen 4+).
+#   anything else -- treated as a raw -march=<value> (e.g. "znver4", "native")
+#                  passed straight to the compiler, with ggml's own feature
+#                  detection left off so the two don't fight over flags.
+# Not applied on Windows/macOS: MSVC doesn't take -march=x86-64-vN, and Apple
+# builds are arm64.
+# -----------------------------------------------------------------------------
+set(WHISPER_ARCH_LEVEL "" CACHE STRING "x86-64 microarch level: universal, v3 (default), v4, or a raw -march value")
+
+if (NOT WIN32 AND NOT APPLE)
+    if (WHISPER_ARCH_LEVEL STREQUAL "" OR WHISPER_ARCH_LEVEL STREQUAL "v3")
+        set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+        set(GGML_SSE42  ON  CACHE BOOL "" FORCE)
+        set(GGML_AVX    ON  CACHE BOOL "" FORCE)
+        set(GGML_AVX2   ON  CACHE BOOL "" FORCE)
+        set(GGML_BMI2   ON  CACHE BOOL "" FORCE)
+        set(GGML_FMA    ON  CACHE BOOL "" FORCE)
+        set(GGML_F16C   ON  CACHE BOOL "" FORCE)
+        set(GGML_AVX512 OFF CACHE BOOL "" FORCE)
+    elseif (WHISPER_ARCH_LEVEL STREQUAL "universal")
+        set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+        set(GGML_SSE42  OFF CACHE BOOL "" FORCE)
+        set(GGML_AVX    OFF CACHE BOOL "" FORCE)
+        set(GGML_AVX2   OFF CACHE BOOL "" FORCE)
+        set(GGML_BMI2   OFF CACHE BOOL "" FORCE)
+        set(GGML_FMA    OFF CACHE BOOL "" FORCE)
+        set(GGML_F16C   OFF CACHE BOOL "" FORCE)
+        set(GGML_AVX512 OFF CACHE BOOL "" FORCE)
+    elseif (WHISPER_ARCH_LEVEL STREQUAL "v4")
+        set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+        set(GGML_SSE42  ON  CACHE BOOL "" FORCE)
+        set(GGML_AVX    ON  CACHE BOOL "" FORCE)
+        set(GGML_AVX2   ON  CACHE BOOL "" FORCE)
+        set(GGML_BMI2   ON  CACHE BOOL "" FORCE)
+        set(GGML_FMA    ON  CACHE BOOL "" FORCE)
+        set(GGML_F16C   ON  CACHE BOOL "" FORCE)
+        set(GGML_AVX512 ON  CACHE BOOL "" FORCE)
+    elseif (WHISPER_ARCH_LEVEL STREQUAL "native")
+        set(GGML_NATIVE ON CACHE BOOL "" FORCE)
+    else()
+        set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+        add_compile_options(-march=${WHISPER_ARCH_LEVEL})
+    endif()
+endif()
 
 if (WIN32)
     # MAX_PATH workaround: vulkan-shaders-gen sub-build creates long paths;

@@ -1,0 +1,216 @@
+# Maintainer: nava <nava@noreply.com>
+#
+# Whisper Destilado — Arch packages, four microarchitecture variants.
+#
+# ONE makepkg run produces FOUR packages. Each is SELF-CONTAINED: a person
+# downloads exactly one file, runs `pacman -U`, and it works.
+#
+#   makepkg                              # all four, ~20-30 min
+#   makepkg --pkg whisper-destilado-v3   # just one
+#
+# Builds the latest pushed main. Commit and push first — a parent commit
+# pointing at unpushed submodule commits fails in prepare().
+#
+# Which variant is which (see WHISPER_ARCH_LEVEL in the root CMakeLists.txt):
+#   universal  true x86-64 baseline (SSE2 only) — works on ANY x86-64 CPU
+#   v3         AVX2/BMI2/FMA   (Intel Haswell 2013+, AMD Excavator/Zen 2015+)
+#               — this is what the project has always shipped
+#   v4         AVX-512F        (Intel Skylake-X/Ice Lake+, AMD Zen 4+)
+#   zen4       -march=znver4   (AMD Zen 4 specifically)
+#
+# None of this touches GPU inference — that always runs through Vulkan
+# (GGML_VULKAN, forced ON regardless of variant). The level only changes
+# ggml's CPU kernels: mel spectrogram, resampling, and any op without a
+# Vulkan path.
+#
+# A downloader finds their level with:
+#   /lib/ld-linux-x86-64.so.2 --help | grep -A4 'Subdirectories of glibc-hwcaps'
+#
+# NOTE: -march=native is deliberately NOT offered here. It bakes in whatever
+# the BUILD machine supports and SIGILLs on anything older — fine for a local
+# install (scripts/linux/build.sh's interactive menu offers it), never for
+# something uploaded.
+
+pkgbase=whisper-destilado
+pkgname=('whisper-destilado-universal'
+         'whisper-destilado-v3'
+         'whisper-destilado-v4'
+         'whisper-destilado-zen4')
+pkgver=0.1.0.r19.gc9843a2
+pkgrel=1
+arch=('x86_64')
+url='https://github.com/minervarr/whisper_ui_cpp'
+license=('AGPL3')
+
+# Only these five are dynamic. Everything else — whisper.cpp/ggml, soxr,
+# freetype, msdfgen — is linked statically into the binary, by design.
+# pacman enforces these on `pacman -U`, so they are what stands between a
+# downloader and a missing-library error at first launch.
+depends=('alsa-lib' 'jack2' 'vulkan-icd-loader' 'wayland' 'libxkbcommon' 'gcc-libs')
+
+# shader-slang-bin: slangc is REQUIRED at build time — no .spv is committed,
+#   and VceShaders.cmake otherwise falls back to a hardcoded Windows path.
+# wayland-protocols + wayland: wayland-scanner generates the xdg-shell and
+#   idle-inhibit glue from the system protocol XML at build time.
+makedepends=('git' 'cmake' 'ninja' 'shader-slang-bin' 'vulkan-headers'
+             'wayland-protocols')
+
+options=('!lto' '!debug')
+
+source=("whisper_player::git+https://github.com/minervarr/whisper_ui_cpp.git#branch=main"
+        'whisper-destilado.desktop'
+        'whisper-destilado.svg')
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP')
+
+PKGEXT='.pkg.tar.zst'
+COMPRESSZST=(zstd -c -T0 -3 -)
+
+# variant -> WHISPER_ARCH_LEVEL. Same set scripts/linux/build.sh --share
+# produces as tarballs, so the two distribution paths stay in step.
+_arch_level() {
+    case "$1" in
+        universal) printf 'universal' ;;
+        v3)        printf 'v3' ;;
+        v4)        printf 'v4' ;;
+        zen4)      printf 'znver4' ;;
+        *)         echo "unknown variant: $1" >&2; return 1 ;;
+    esac
+}
+
+_slangc() { command -v slangc || echo /opt/shader-slang-bin/bin/slangc; }
+
+pkgver() {
+    cd "${srcdir}/whisper_player"
+    # No git tags exist; 0.1.0 is a placeholder — bump when one is cut.
+    printf "0.1.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+    cd "${srcdir}/whisper_player"
+    # 4 submodules, up to 4 levels deep (vk_canvas -> vulkan_font_engine ->
+    # freetype). Running once for all four variants is the main reason this
+    # is a split package rather than four separate makepkg runs.
+    git submodule update --init --recursive
+}
+
+build() {
+    local _v _level _arch_arg
+    for _v in universal v3 v4 zen4; do
+        _level="$(_arch_level "$_v")"
+        _arch_arg=(-DWHISPER_ARCH_LEVEL="$_level")
+
+        echo "==> Building variant '${_v}' (WHISPER_ARCH_LEVEL=${_level})"
+
+        cmake -S whisper_player -B "build-${_v}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVCE_SLANGC="$(_slangc)" \
+            "${_arch_arg[@]}"
+        cmake --build "build-${_v}"
+    done
+}
+
+check() {
+    # whisper_tests, per variant. A variant the BUILD machine cannot execute
+    # dies with SIGILL — reported as SKIPPED, never folded into "passed", so
+    # an untested variant never looks like a verified one.
+    local _v _rc _skipped=()
+    for _v in universal v3 v4 zen4; do
+        echo "==> whisper_tests [${_v}]"
+        _rc=0
+        "./build-${_v}/whisper_tests" || _rc=$?
+        if (( _rc == 132 )); then          # 128 + SIGILL
+            echo "    SKIPPED — this CPU cannot execute ${_v} code"
+            _skipped+=("$_v")
+        elif (( _rc != 0 )); then
+            echo "    FAILED (exit ${_rc}) for variant '${_v}'" >&2
+            return 1
+        fi
+    done
+    (( ${#_skipped[@]} )) && \
+        echo "==> NOTE: unverified on this machine: ${_skipped[*]} — test on target hardware"
+    return 0
+}
+
+# Everything a variant installs. Identical for all four apart from which
+# build-<variant>/ the binary and shaders come from.
+_package_variant() {
+    local _v="$1"
+    cd "${srcdir}"
+
+    install -dm755 "${pkgdir}/opt/whisper_destilado"
+    install -Dm755 "build-${_v}/whisper_destilado" \
+        "${pkgdir}/opt/whisper_destilado/whisper_destilado"
+
+    # Shaders + font from the BUILD tree — the CMake POST_BUILD step already
+    # copies both into build-<variant>/assets/, and this is where whisper's
+    # own MSDF atlas cache would land too, except that cache actually lives
+    # in $HOME/.config/whisper_destilado/, never next to the binary, so
+    # there is nothing stale to accidentally package here.
+    cp -r "build-${_v}/assets" "${pkgdir}/opt/whisper_destilado/assets"
+    find "${pkgdir}/opt/whisper_destilado/assets" -type f -exec chmod 644 {} +
+
+    # Empty on purpose — a recipient drops their own model in (see the
+    # .install post-install message). Not shipped: models run 1-3+ GB and
+    # are separately licensed by their publisher.
+    install -dm755 "${pkgdir}/opt/whisper_destilado/models"
+
+    # A symlink, not a wrapper: readlink("/proc/self/exe") resolves it, so
+    # inference::exe_dir() still reports /opt/whisper_destilado/.
+    install -dm755 "${pkgdir}/usr/bin"
+    ln -s /opt/whisper_destilado/whisper_destilado "${pkgdir}/usr/bin/whisper_destilado"
+
+    install -Dm644 whisper-destilado.desktop \
+        "${pkgdir}/usr/share/applications/whisper-destilado.desktop"
+    install -Dm644 whisper-destilado.svg \
+        "${pkgdir}/usr/share/icons/hicolor/scalable/apps/whisper-destilado.svg"
+
+    # Static linking pulls these libraries' notices into the binary, so they
+    # ship with it. Paths tolerate a submodule reorganising its license file.
+    local _lic="${pkgdir}/usr/share/licenses/whisper-destilado-${_v}" f _src _name
+    install -dm755 "${_lic}"
+    install -Dm644 whisper_player/LICENSE "${_lic}/LICENSE"
+    for f in \
+        "third_party/whisper.cpp/LICENSE:whisper.cpp" \
+        "third_party/soxr/COPYING.LGPL:soxr" \
+        "first_party/audio_engine/LICENSE:audio_engine" \
+        "framework/vk_canvas/LICENSE:vk_canvas" \
+        "framework/vk_canvas/first_party/vulkan_font_engine/third_party/freetype/LICENSE.TXT:freetype" \
+        "framework/vk_canvas/first_party/vulkan_font_engine/third_party/msdfgen/LICENSE.txt:msdfgen"
+    do
+        _src="whisper_player/${f%%:*}"; _name="${f##*:}"
+        [[ -f "${_src}" ]] && install -Dm644 "${_src}" "${_lic}/LICENSE.${_name}"
+    done
+}
+
+# All four provide and conflict with 'whisper-destilado', so pacman refuses
+# to hold two variants at once and swapping one for another is a single -U.
+
+package_whisper-destilado-universal() {
+    pkgdesc="Local voice transcription on whisper.cpp with a Vulkan UI (portable x86-64 build)"
+    provides=('whisper-destilado'); conflicts=('whisper-destilado')
+    install=whisper-destilado.install
+    _package_variant universal
+}
+
+package_whisper-destilado-v3() {
+    pkgdesc="Local voice transcription on whisper.cpp with a Vulkan UI (x86-64-v3 / AVX2)"
+    provides=('whisper-destilado'); conflicts=('whisper-destilado')
+    install=whisper-destilado.install
+    _package_variant v3
+}
+
+package_whisper-destilado-v4() {
+    pkgdesc="Local voice transcription on whisper.cpp with a Vulkan UI (x86-64-v4 / AVX-512)"
+    provides=('whisper-destilado'); conflicts=('whisper-destilado')
+    install=whisper-destilado.install
+    _package_variant v4
+}
+
+package_whisper-destilado-zen4() {
+    pkgdesc="Local voice transcription on whisper.cpp with a Vulkan UI (AMD Zen 4 tuned)"
+    provides=('whisper-destilado'); conflicts=('whisper-destilado')
+    install=whisper-destilado.install
+    _package_variant zen4
+}
