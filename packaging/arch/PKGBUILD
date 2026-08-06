@@ -6,7 +6,10 @@
 # downloads exactly one file, runs `pacman -U`, and it works.
 #
 #   makepkg                              # all four, ~20-30 min
-#   makepkg --pkg whisper-destilado-v3   # just one
+#
+# makepkg 7.x has no per-split-package build flag (--pkg was removed) --
+# build() always produces all four variants; there is no way to build only
+# one from the CLI.
 #
 # Builds the latest pushed main. Commit and push first — a parent commit
 # pointing at unpushed submodule commits fails in prepare().
@@ -36,7 +39,7 @@ pkgname=('whisper-destilado-universal'
          'whisper-destilado-v3'
          'whisper-destilado-v4'
          'whisper-destilado-zen4')
-pkgver=0.1.0.r19.gc9843a2
+pkgver=0.1.0.r20.g22ba206
 pkgrel=1
 arch=('x86_64')
 url='https://github.com/minervarr/whisper_ui_cpp'

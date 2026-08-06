@@ -11,8 +11,8 @@ or directly:
 
 ```bash
 cd packaging/arch
-makepkg                                  # all four
-makepkg --pkg whisper-destilado-v3       # just one
+makepkg                                  # all four -- makepkg 7.x has no
+                                          # per-split-package build flag
 ```
 
 Builds the last **pushed** commit on `main`, not your working tree. Commit and
