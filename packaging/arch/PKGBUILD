@@ -39,7 +39,7 @@ pkgname=('whisper-destilado-universal'
          'whisper-destilado-v3'
          'whisper-destilado-v4'
          'whisper-destilado-zen4')
-pkgver=0.1.0.r20.g22ba206
+pkgver=0.1.0.r21.g0707ccb
 pkgrel=1
 arch=('x86_64')
 url='https://github.com/minervarr/whisper_ui_cpp'
@@ -51,11 +51,11 @@ license=('AGPL3')
 # downloader and a missing-library error at first launch.
 depends=('alsa-lib' 'jack2' 'vulkan-icd-loader' 'wayland' 'libxkbcommon' 'gcc-libs')
 
-# shader-slang-bin: slangc is REQUIRED at build time — no .spv is committed,
+# shader-slang: slangc is REQUIRED at build time — no .spv is committed,
 #   and VceShaders.cmake otherwise falls back to a hardcoded Windows path.
 # wayland-protocols + wayland: wayland-scanner generates the xdg-shell and
 #   idle-inhibit glue from the system protocol XML at build time.
-makedepends=('git' 'cmake' 'ninja' 'shader-slang-bin' 'vulkan-headers'
+makedepends=('git' 'cmake' 'ninja' 'shader-slang' 'vulkan-headers'
              'wayland-protocols')
 
 options=('!lto' '!debug')
@@ -82,7 +82,7 @@ _arch_level() {
     esac
 }
 
-_slangc() { command -v slangc || echo /opt/shader-slang-bin/bin/slangc; }
+_slangc() { command -v slangc || echo /opt/shader-slang/bin/slangc; }
 
 pkgver() {
     cd "${srcdir}/whisper_player"

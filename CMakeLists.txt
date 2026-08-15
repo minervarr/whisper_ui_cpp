@@ -191,9 +191,9 @@ target_link_libraries(whisper_destilado_cli PRIVATE whisper_core)
 # gui — vk_canvas app (Wayland on Linux, Win32 on Windows)
 # -----------------------------------------------------------------------------
 # slangc for the engine's Slang->SPIR-V shader step. On this Linux setup the
-# compiler comes from the shader-slang-bin package.
-if (NOT WIN32 AND NOT DEFINED CACHE{VCE_SLANGC} AND EXISTS /opt/shader-slang-bin/bin/slangc)
-    set(VCE_SLANGC /opt/shader-slang-bin/bin/slangc CACHE FILEPATH "slangc")
+# compiler comes from the shader-slang package.
+if (NOT WIN32 AND NOT DEFINED CACHE{VCE_SLANGC} AND EXISTS /opt/shader-slang/bin/slangc)
+    set(VCE_SLANGC /opt/shader-slang/bin/slangc CACHE FILEPATH "slangc")
 endif()
 
 add_subdirectory(framework/vk_canvas/core vk_canvas_core)

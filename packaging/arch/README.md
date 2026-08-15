@@ -104,7 +104,7 @@ their own install rules into the top-level install set, so it would install
 | Flag | Why |
 |---|---|
 | `-DWHISPER_ARCH_LEVEL=` *(per variant)* | `universal`/`v3`/`v4`/`znver4`; see the root `CMakeLists.txt`. |
-| `-DVCE_SLANGC=...` | `slangc` is required at build time; no `.spv` is committed, and `VceShaders.cmake` otherwise falls back to a hardcoded Windows path. AUR has it as `shader-slang-bin` (`/opt/shader-slang-bin/bin/slangc`, not on `PATH`). |
+| `-DVCE_SLANGC=...` | `slangc` is required at build time; no `.spv` is committed, and `VceShaders.cmake` otherwise falls back to a hardcoded Windows path. AUR has it as `shader-slang` (`/opt/shader-slang/bin/slangc`, not on `PATH`). |
 
 **`-march=native` is deliberately never used here.** It bakes in whatever the
 build machine supports and SIGILLs on anything older — fine for a local

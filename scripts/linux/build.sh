@@ -116,8 +116,8 @@ SLANGC_ARG=()
 if [[ "${CMAKE_ARGS[*]:-}" != *"VCE_SLANGC"* && -z "${VULKAN_SDK:-}" ]]; then
     if command -v slangc >/dev/null 2>&1; then
         SLANGC_ARG=(-DVCE_SLANGC="$(command -v slangc)")
-    elif [[ -x /opt/shader-slang-bin/bin/slangc ]]; then
-        SLANGC_ARG=(-DVCE_SLANGC=/opt/shader-slang-bin/bin/slangc)
+    elif [[ -x /opt/shader-slang/bin/slangc ]]; then
+        SLANGC_ARG=(-DVCE_SLANGC=/opt/shader-slang/bin/slangc)
     fi
 fi
 
