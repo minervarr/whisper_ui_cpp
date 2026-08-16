@@ -23,6 +23,11 @@ std::unique_ptr<CaptureBackend> make_jack();
 std::vector<CaptureDeviceInfo>  enumerate_usb();
 std::unique_ptr<CaptureBackend> make_usb(const std::string & device_id);
 
+#ifdef __ANDROID__
+std::vector<CaptureDeviceInfo>  enumerate_aaudio();
+std::unique_ptr<CaptureBackend> make_aaudio(const std::string & device_id);
+#endif
+
 #ifdef _WIN32
 std::vector<CaptureDeviceInfo>  enumerate_wasapi();
 std::unique_ptr<CaptureBackend> make_wasapi(const std::string & device_id);

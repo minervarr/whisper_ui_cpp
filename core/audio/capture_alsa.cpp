@@ -1,5 +1,5 @@
-// ALSA capture backend: wraps audio_engine's AlsaCaptureDriver (direct hw:
-// device access, no sound server) behind the CaptureBackend seam.
+// ALSA capture backend: wraps audio_engine's AlsaSource (direct hw: device
+// access, no sound server) behind the CaptureBackend seam.
 #ifndef _WIN32
 
 #include "core/audio/capture_backends.h"
@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-#include "alsa_capture.h"
+#include "alsa_source.h"
 
 namespace audio {
 namespace detail {
@@ -31,12 +31,17 @@ public:
                    "). ¿Está en uso por otro programa (p. ej. jackd)?";
         }
         // Ask for whisper's format; the driver negotiates the nearest the
-        // hardware supports and the getters report the effective values.
-        if (!driver_.configureCapture(kTargetSampleRate, 1, 16)) {
+        // hardware supports and activeFormat() reports the effective values.
+        ae::AudioFormat fmt;
+        fmt.sampleRate = kTargetSampleRate;
+        fmt.channels   = 1;
+        fmt.bitDepth   = 16;
+        fmt.subslotBytes = 2;
+        if (!driver_.configure(fmt)) {
             driver_.close();
             return "El dispositivo ALSA no aceptó ninguna configuración de captura.";
         }
-        if (!driver_.startCapture()) {
+        if (!driver_.start()) {
             driver_.close();
             return "No se pudo iniciar la captura ALSA.";
         }
@@ -69,10 +74,11 @@ public:
 private:
     void run()
     {
-        const int rate     = driver_.getConfiguredCaptureRate();
-        const int channels = driver_.getConfiguredCaptureChannels();
-        int subslot        = driver_.getConfiguredCaptureSubslotSize();
-        if (subslot == 0) subslot = driver_.getConfiguredCaptureBitDepth() / 8;
+        const ae::AudioFormat fmt = driver_.activeFormat();
+        const int rate     = fmt.sampleRate;
+        const int channels = fmt.channels;
+        int subslot        = fmt.subslotBytes;
+        if (subslot == 0) subslot = fmt.bitDepth / 8;
 
         Resampler16k resampler(rate);
         if (!resampler.ok()) {
@@ -85,12 +91,12 @@ private:
         std::vector<float>   float_buf;
 
         while (!stop_flag_.load(std::memory_order_acquire)) {
-            int n = driver_.readCapture(read_buf.data(), (int) read_buf.size());
+            int n = driver_.read(read_buf.data(), (int) read_buf.size());
             if (n < 0) {
                 abort_reason_ = "Error al leer del dispositivo ALSA.";
                 break;
             }
-            if (n == 0) continue;   // readCapture already waited (<=100 ms)
+            if (n == 0) continue;   // read already waited (<=100 ms)
 
             float_buf.clear();
             float chunk_peak = pcm_to_float_mono(read_buf.data(), (size_t) n,
@@ -105,14 +111,14 @@ private:
 
     void finish()
     {
-        driver_.stopCapture();
+        driver_.stop();
         driver_.close();
         peak_.store(0.0f, std::memory_order_release);
         running_.store(false, std::memory_order_release);
     }
 
     std::string                         device_id_;
-    AlsaCaptureDriver                   driver_;
+    AlsaSource                          driver_;
     std::shared_ptr<std::vector<float>> buffer_;
     std::thread                         thread_;
     std::atomic<bool>                   running_{false};
@@ -126,7 +132,7 @@ private:
 std::vector<CaptureDeviceInfo> enumerate_alsa()
 {
     std::vector<CaptureDeviceInfo> out;
-    for (const auto & d : AlsaCaptureDriver::enumerateCaptureDevices()) {
+    for (const auto & d : AlsaSource::enumerateCaptureDevices()) {
         out.push_back({BackendKind::Alsa, d.deviceId, d.name});
     }
     return out;

@@ -1,5 +1,5 @@
 // JACK2 capture backend: client of the user's already-running jackd (real
-// libjack only — never pipewire-jack). Wraps audio_engine's JackCaptureDriver.
+// libjack only — never pipewire-jack). Wraps audio_engine's JackSource.
 #ifndef _WIN32
 
 #include "core/audio/capture_backends.h"
@@ -12,7 +12,7 @@
 #include <thread>
 #include <vector>
 
-#include "jack_capture.h"
+#include "jack_source.h"
 
 namespace audio {
 namespace detail {
@@ -33,11 +33,17 @@ public:
         }
         // Mono capture; rate/bits are hints — the server dictates float32
         // at its own rate.
-        if (!driver_.configureCapture(kTargetSampleRate, 1, 32)) {
+        ae::AudioFormat fmt;
+        fmt.sampleRate = kTargetSampleRate;
+        fmt.channels   = 1;
+        fmt.bitDepth   = 32;
+        fmt.subslotBytes = 4;
+        fmt.isFloat    = true;
+        if (!driver_.configure(fmt)) {
             driver_.close();
             return "No se pudieron registrar los puertos de entrada JACK.";
         }
-        if (!driver_.startCapture()) {
+        if (!driver_.start()) {
             driver_.close();
             return "No se pudo conectar a los puertos de captura del servidor JACK.";
         }
@@ -70,7 +76,7 @@ public:
 private:
     void run()
     {
-        const int rate = driver_.getConfiguredCaptureRate();
+        const int rate = driver_.activeFormat().sampleRate;
 
         Resampler16k resampler(rate);
         if (!resampler.ok()) {
@@ -83,7 +89,7 @@ private:
         std::vector<uint8_t> read_buf(8192);
 
         while (!stop_flag_.load(std::memory_order_acquire)) {
-            int n = driver_.readCapture(read_buf.data(), (int) read_buf.size());
+            int n = driver_.read(read_buf.data(), (int) read_buf.size());
             if (n < 0) {
                 abort_reason_ = "Se perdió la conexión con el servidor JACK.";
                 break;
@@ -112,13 +118,13 @@ private:
 
     void finish()
     {
-        driver_.stopCapture();
+        driver_.stop();
         driver_.close();
         peak_.store(0.0f, std::memory_order_release);
         running_.store(false, std::memory_order_release);
     }
 
-    JackCaptureDriver                   driver_;
+    JackSource                          driver_;
     std::shared_ptr<std::vector<float>> buffer_;
     std::thread                         thread_;
     std::atomic<bool>                   running_{false};
@@ -131,7 +137,7 @@ private:
 
 bool jack_server_reachable()
 {
-    JackCaptureDriver probe;
+    JackSource probe;
     if (!probe.open("whisper_destilado_probe")) return false;
     probe.close();
     return true;

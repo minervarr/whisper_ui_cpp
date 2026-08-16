@@ -50,6 +50,11 @@ struct DrawState {
     int   popup_selected = -1;
     float popup_scroll = 0.0f;
 
+    // Display cutout insets (Host::safeInsets — zero on desktops). The layout
+    // derives from the SAFE rectangle, so a phone's camera notch is never
+    // drawn under. Refreshed every frame from the host.
+    int inset_top = 0, inset_bottom = 0, inset_left = 0, inset_right = 0;
+
     PointerState ptr;
 };
 

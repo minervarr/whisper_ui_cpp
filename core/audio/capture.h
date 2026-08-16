@@ -11,6 +11,7 @@ enum class BackendKind {
     Alsa   = 1,   // Linux, direct hw:
     Jack   = 2,   // Linux, client of the user's running jackd (real JACK2)
     Usb    = 3,   // both, libusb straight to the DAC
+    Aaudio = 4,   // Android, NDK AAudio input
 };
 
 struct CaptureDeviceInfo {

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- AAudio capture needs RECORD_AUDIO at runtime (see MainActivity: it
+         asks once in onCreate, before the app can start a recording). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application android:label="whisper_destilado">
+        <activity
+            android:name="io.nava.whisper_destilado.MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:label="whisper_destilado">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="whisper_destilado" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

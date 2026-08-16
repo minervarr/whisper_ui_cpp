@@ -8,10 +8,12 @@ namespace gui {
 
 namespace {
 
-// The popup covers the central band of the window.
-Rect popup_area(float w, float h)
+// The popup covers the central band of the SAFE area (the window minus the
+// display cutout — a notch is a hole in the glass, never drawn under).
+Rect popup_area(float l, float t, float safe_w, float safe_h)
 {
-    return { w * 0.15f, h * 0.12f, w * 0.70f, h * 0.72f };
+    return { l + safe_w * 0.15f, t + safe_h * 0.12f,
+             safe_w * 0.70f, safe_h * 0.72f };
 }
 
 } // namespace
@@ -30,6 +32,15 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
     const float pad = c.pad();
     TypeScale ts(H);
 
+    // The usable rectangle: the window minus whatever the hardware has taken
+    // (Host::safeInsets — the display cutout on Android, zero on both
+    // desktops). Everything below is laid out inside it, so a camera notch is
+    // never drawn under, and it is read on every pass because a rotation
+    // moves the cutout without restarting the app.
+    const float L = (float) st.inset_left, T = (float) st.inset_top;
+    const float R = W - (float) st.inset_right, B = H - (float) st.inset_bottom;
+    const float safeW = R - L, safeH = B - T;
+
     c.clear(pal::bg);
 
     // ── modal popup: its own screen, nothing else drawn ────────────────────
@@ -39,18 +50,18 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
     // don't draw the base screen — zero bleed by construction.
     if (st.popup != DrawState::Popup::None && st.popup_items) {
         const char * title = st.popup == DrawState::Popup::Lang
-                                 ? "Selecciona el idioma"
-                                 : "Selecciona el micrófono";
-        c.text(title, pad, pad, ts.title, pal::text);
-        c.text("ESC o clic fuera para cerrar", pad, pad + ts.title * 1.5f,
+                                  ? "Selecciona el idioma"
+                                  : "Selecciona el micrófono";
+        c.text(title, L + pad, T + pad, ts.title, pal::text);
+        c.text("ESC o clic fuera para cerrar", L + pad, T + pad + ts.title * 1.5f,
                ts.small, pal::dim);
 
-        Rect area = popup_area(W, H);
+        Rect area = popup_area(L, T, safeW, safeH);
 
         // Pointer -> hovered item index, so the row under the cursor
         // highlights live (no click needed).
         int hover = -1;
-        const float row_h = popup_row_height(H);
+        const float row_h = popup_row_height(safeH);
         if (area.contains(st.ptr.x, st.ptr.y)) {
             int i = (int) ((st.ptr.y - area.y + st.popup_scroll) / row_h);
             if (i >= 0 && i < (int) st.popup_items->size()) hover = i;
@@ -66,21 +77,21 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
     }
 
     const RecorderController & ctl = *st.ctl;
-    float y = pad;
+    float y = T + pad;
 
     // ── status row: LED dot · status text · timer ──────────────────────────
     const float led_d = ts.body * 1.1f;
-    c.rect(pad, y, led_d, led_d, led_to_color(ctl.led_color()), led_d * 0.5f);
-    c.text(ctl.status_line(), pad + led_d + pad * 0.5f, y, ts.body, pal::text);
-    c.textRight(ctl.timer_text(), W - pad, y, ts.body,
+    c.rect(L + pad, y, led_d, led_d, led_to_color(ctl.led_color()), led_d * 0.5f);
+    c.text(ctl.status_line(), L + pad + led_d + pad * 0.5f, y, ts.body, pal::text);
+    c.textRight(ctl.timer_text(), R - pad, y, ts.body,
                 ctl.state() == UiState::Recording ? pal::red : pal::dim);
     y += led_d + pad;
 
     // ── record button ──────────────────────────────────────────────────────
     {
-        const float bw = W * 0.42f;
-        const float bh = H * 0.11f;
-        Rect r{ (W - bw) / 2.0f, y, bw, bh };
+        const float bw = safeW * 0.42f;
+        const float bh = safeH * 0.11f;
+        Rect r{ L + (safeW - bw) / 2.0f, y, bw, bh };
         const char * label = "Grabar";
         Color bg = pal::btnIdle;
         switch (ctl.state()) {
@@ -99,15 +110,15 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
 
     // ── language + microphone rows ─────────────────────────────────────────
     {
-        const float rh = H * 0.062f;
-        Rect lang_row{ pad, y, W - 2 * pad, rh };
+        const float rh = safeH * 0.062f;
+        Rect lang_row{ L + pad, y, safeW - 2 * pad, rh };
         widgets::drawDropdownField(c, lang_row, "Idioma", st.lang_label,
                                    lang_row.contains(st.ptr.x, st.ptr.y),
                                    widgets::kTextFit);
         hits.push_back({lang_row, ActLangField});
         y += rh + pad * 0.5f;
 
-        Rect mic_row{ pad, y, W - 2 * pad, rh };
+        Rect mic_row{ L + pad, y, safeW - 2 * pad, rh };
         widgets::drawDropdownField(c, mic_row, "Micrófono", st.mic_label,
                                    mic_row.contains(st.ptr.x, st.ptr.y),
                                    widgets::kTextFit);
@@ -117,9 +128,9 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
 
     // ── transcript area ────────────────────────────────────────────────────
     {
-        const float bottom_h = H * 0.19f;                 // reserved for actions
-        const float th = H - y - bottom_h - pad;
-        Rect area{ pad, y, W - 2 * pad, th };
+        const float bottom_h = safeH * 0.19f;             // reserved for actions
+        const float th = safeH - (y - T) - bottom_h - pad;
+        Rect area{ L + pad, y, safeW - 2 * pad, th };
         c.rect(area.x, area.y, area.w, area.h, pal::panel, pad * 0.3f);
 
         std::string body = ctl.transcript_preview();
@@ -150,10 +161,10 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         const bool has_result = ctl.last_result() != nullptr &&
                                 ctl.last_result()->error.empty() &&
                                 !ctl.last_result()->segments.empty();
-        const float rh = H * 0.055f;
+        const float rh = safeH * 0.055f;
 
         // format selector + save path + Guardar
-        Rect seg{ pad, y, W * 0.30f, rh };
+        Rect seg{ L + pad, y, safeW * 0.30f, rh };
         widgets::drawSegmented(c, seg,
                                {kFormats[0], kFormats[1], kFormats[2], kFormats[3]},
                                st.format_sel);
@@ -163,9 +174,9 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
 
         // Two export buttons (Guardar + Copiar) share the right side; the
         // path field takes the rest.
-        const float btn_w = W * 0.12f;
+        const float btn_w = safeW * 0.12f;
         Rect path{ seg.x + seg.w + pad * 0.5f, y,
-                   W - seg.w - 4.0f * pad - 2.0f * btn_w, rh };
+                   safeW - seg.w - 4.0f * pad - 2.0f * btn_w, rh };
         c.rect(path.x, path.y, path.w, path.h,
                st.path_focused ? pal::panel2 : pal::panel, rh * 0.2f);
         std::string shown = truncateToWidth(c, st.save_path, path.w - pad,
@@ -189,20 +200,20 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         y += rh + pad * 0.5f;
 
         // retry row + toast
-        Rect rq{ pad, y, W * 0.34f, rh };
+        Rect rq{ L + pad, y, safeW * 0.34f, rh };
         widgets::drawFitButton(c, rq, "Reintentar con más calidad",
                                has_result ? pal::btnIdle : pal::track,
                                pal::text, rh * 0.25f);
         if (has_result) hits.push_back({rq, ActRetryQuality});
 
-        Rect rl{ rq.x + rq.w + pad * 0.5f, y, W * 0.34f, rh };
+        Rect rl{ rq.x + rq.w + pad * 0.5f, y, safeW * 0.34f, rh };
         widgets::drawFitButton(c, rl, "Reintentar con este idioma",
                                has_result ? pal::btnIdle : pal::track,
                                pal::text, rh * 0.25f);
         if (has_result) hits.push_back({rl, ActRetryLang});
 
         if (!st.toast.empty()) {
-            c.textRight(st.toast, W - pad, y + (rh - ts.small) / 2,
+            c.textRight(st.toast, R - pad, y + (rh - ts.small) / 2,
                         ts.small, pal::green);
         }
     }

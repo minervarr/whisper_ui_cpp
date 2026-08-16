@@ -1,0 +1,72 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace "io.nava.whisper_destilado"
+
+    lint {
+        disable 'ExpiredTargetSdkVersion'
+    }
+
+    // 36 is what this phone's SDK has (Matrix_Player: same AGP + this exact
+    // compileSdk for the same reason — the SDK is root-owned so Gradle cannot
+    // auto-install another one).
+    compileSdkVersion 36
+    ndkVersion "29.0.14206865"
+
+    defaultConfig {
+        applicationId "io.nava.whisper_destilado"
+        minSdkVersion 26          // AAudio floor
+        targetSdkVersion 36
+        versionCode 1
+        versionName "0.1.0-android"
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DCMAKE_BUILD_TYPE=Release"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "../CMakeLists.txt"
+        }
+    }
+
+    // app_shell's one Java file (AppShellActivity) — the IME/clipboard half
+    // android_host.hh needs. See app_shell/CLAUDE.md: the consumer adds it to
+    // its own sourceSets; this module's MainActivity subclasses it.
+    sourceSets {
+        main {
+            java.srcDirs += '../../framework/app_shell/platform/android/java'
+        }
+    }
+
+    splits {
+        abi {
+            enable true
+            reset()
+            include "arm64-v8a", "x86_64"
+            universalApk false
+        }
+    }
+}
+
+// android/CMakeLists.txt writes compiled shaders and the bundled font directly
+// into app/src/main/assets/ as a side effect of the native build. AGP's
+// asset-merge tasks don't know that write is coming — they only track declared
+// source-set inputs — so without this the shaders silently never reach the APK.
+afterEvaluate {
+    def nativeBuildTasks = tasks.matching { it.name.startsWith("buildCMake") }
+    tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+        dependsOn nativeBuildTasks
+    }
+}

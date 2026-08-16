@@ -103,12 +103,12 @@ add_subdirectory(third_party/soxr)
 # -----------------------------------------------------------------------------
 # first_party/audio_engine — capture backends
 # -----------------------------------------------------------------------------
-if (WIN32)
-    add_subdirectory(first_party/audio_engine/scripts/windows ae_windows)
-else()
-    set(AUDIO_ENGINE_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-    add_subdirectory(first_party/audio_engine/scripts/linux ae_linux)
-endif()
+# The engine's desktop build is its root CMakeLists.txt (scripts/<os> are now
+# thin launchers). We only want the capture backends, not the FLAC/MP3/DSD
+# decoders or the smoke-test tools.
+set(AUDIO_ENGINE_BUILD_DECODERS OFF CACHE BOOL "" FORCE)
+set(AUDIO_ENGINE_BUILD_TOOLS   OFF CACHE BOOL "" FORCE)
+add_subdirectory(first_party/audio_engine ae_engine)
 
 # -----------------------------------------------------------------------------
 # whisper_core — portable app core (zero UI deps)
@@ -123,15 +123,22 @@ add_library(whisper_core STATIC
     core/audio/capture_convert.cpp
     core/audio/file_reader.cpp
     core/audio/capture.cpp
-    core/audio/capture_usb.cpp
 )
 
 if (WIN32)
-    target_sources(whisper_core PRIVATE core/audio/capture_wasapi.cpp)
+    # WASAPI mic + direct USB (libusb) capture.
+    target_sources(whisper_core PRIVATE
+        core/audio/capture_wasapi.cpp
+        core/audio/capture_usb.cpp
+    )
+elseif(ANDROID)
+    # NDK AAudio mic capture. USB DAC capture is desktop-only for now.
+    target_sources(whisper_core PRIVATE core/audio/capture_aaudio.cpp)
 else()
     target_sources(whisper_core PRIVATE
         core/audio/capture_alsa.cpp
         core/audio/capture_jack.cpp
+        core/audio/capture_usb.cpp
     )
 endif()
 
@@ -149,18 +156,22 @@ target_link_libraries(whisper_core PUBLIC
 if (WIN32)
     # WASAPI + COM device enumeration + MMCSS for the capture backend.
     target_link_libraries(whisper_core PUBLIC
-        audio_engine_windows
+        ae_usb
         ole32 propsys mmdevapi avrt uuid
     )
+elseif(ANDROID)
+    # NDK's own AAudio (API 26+). audio_engine's ae_aaudio is a sink only, so
+    # the capture side links the platform lib directly.
+    target_link_libraries(whisper_core PUBLIC aaudio)
 else()
-    # audio_engine_* targets export their include dirs (usb_audio.h,
-    # alsa_capture.h, jack_capture.h) PUBLIC-ly.
+    # ae_* targets export their include dirs (usb_audio.h, alsa_source.h,
+    # jack_source.h) PUBLIC-ly.
     target_link_libraries(whisper_core PUBLIC
-        audio_engine_linux
-        audio_engine_alsa
+        ae_usb
+        ae_alsa
     )
-    if (TARGET audio_engine_jack)
-        target_link_libraries(whisper_core PUBLIC audio_engine_jack)
+    if (TARGET ae_jack)
+        target_link_libraries(whisper_core PUBLIC ae_jack)
     else()
         message(FATAL_ERROR "JACK2 backend required: install jack2 dev headers (never pipewire-jack)")
     endif()
@@ -198,6 +209,30 @@ endif()
 
 add_subdirectory(framework/vk_canvas/core vk_canvas_core)
 
+# -----------------------------------------------------------------------------
+# app_shell — the Host/AppView seam and its platform hosts. Must come before
+# the gui executable: gui/app.{h,cpp} include app_shell's headers and link it.
+# -----------------------------------------------------------------------------
+# The names this application tells its shell (preserve the existing window
+# class, app_id and title; APP_SHELL_APP_NAME names the log file and Android
+# logcat tag). Default APP_SHELL_STATE_HOME (empty) keeps everything the app
+# WRITES beside the executable — the same self-contained build tree as before.
+set(APP_SHELL_APP_NAME      "whisper_destilado"   CACHE STRING "" FORCE)
+set(APP_SHELL_WIN_CLASS     "WhisperDestiladoMain" CACHE STRING "" FORCE)
+set(APP_SHELL_WINDOW_TITLE  "whisper_destilado"   CACHE STRING "" FORCE)
+set(APP_SHELL_APP_ID        "whisper_destilado"   CACHE STRING "" FORCE)
+add_subdirectory(framework/app_shell app_shell_build)
+
+# The build-time text-size floor generator needs OUR font list (it bakes the
+# worst case across the faces the app actually loads).
+include(AppShellMinTextSize)
+app_shell_generate_min_text_size(
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NewCM10-Book.otf)
+
+# app_shell's ui_metrics.cc includes the header that call generated; the
+# consumer owns the font list, so the consumer owns this dependency too.
+add_dependencies(app_shell generate_ui_min_text_size)
+
 include(framework/vk_canvas/cmake/VceShaders.cmake)
 vce_compile_slang(gui_shared_shaders
     ${CMAKE_BINARY_DIR}/assets/shaders
@@ -222,12 +257,12 @@ vce_compile_slang(gui_shaders
 
 if (WIN32)
     set(_gui_host_sources
-        gui/os/win32_host.cc
         framework/vk_canvas/platform/windows/win32_platform.cc
         resources/app.rc)
 else()
     add_subdirectory(framework/vk_canvas/platform/linux vk_canvas_wayland)
-    set(_gui_host_sources gui/os/wayland_host.cc)
+    set(_gui_host_sources
+        framework/vk_canvas/platform/linux/wayland_platform.cc)
 endif()
 
 # Shared GUI drawing code — the pure views/controller/fonts, no window, no
@@ -245,14 +280,16 @@ add_executable(whisper_destilado
     gui/app.cpp
     ${_gui_host_sources}
 )
-add_dependencies(whisper_destilado gui_shared_shaders gui_shaders)
+add_dependencies(whisper_destilado
+    gui_shared_shaders gui_shaders generate_ui_min_text_size)
 
 target_link_libraries(whisper_destilado PRIVATE whisper_gui_lib)
 
 if (WIN32)
     target_include_directories(whisper_destilado PRIVATE
         framework/vk_canvas/platform/windows)
-    target_link_libraries(whisper_destilado PRIVATE user32)
+    target_link_libraries(whisper_destilado PRIVATE
+        app_shell app_shell_win32 user32)
     if (MSVC)
         target_compile_options(whisper_destilado PRIVATE /utf-8)
         # The manifest is embedded via resources/app.rc (resource id 1, type
@@ -260,7 +297,8 @@ if (WIN32)
         target_link_options(whisper_destilado PRIVATE /MANIFEST:NO)
     endif()
 else()
-    target_link_libraries(whisper_destilado PRIVATE vk_canvas_wayland)
+    target_link_libraries(whisper_destilado PRIVATE
+        app_shell app_shell_wayland vk_canvas_wayland)
 endif()
 
 # Fonts next to the exe (FileAssetReader reads <exe>/assets/), like shaders.
