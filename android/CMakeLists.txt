@@ -158,8 +158,15 @@ target_link_options(whisper_destilado PRIVATE -u ANativeActivity_onCreate)
 # shader compile step, so a plain POST_BUILD is fine). The Gradle-side fix in
 # app/build.gradle (mergeDebugAssets/mergeReleaseAssets depending on the
 # buildCMake* tasks) covers the ordering, same as it does for the shaders.
+#
+# ONE file, not copy_directory. assets/fonts is the shared `fonts` submodule and
+# it is 127 MiB; copying the tree put every face in the workspace into the APK
+# when the app opens exactly one. Copy what gui/fonts.cpp actually names, and
+# keep the flat fonts/ layout the reader expects — matching the desktop rule in
+# the root CMakeLists.txt. Adding a face to gui/fonts.cpp means adding it here.
 add_custom_command(TARGET whisper_destilado POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${REPO_ROOT}/assets/fonts
-        ${WHISPER_ANDROID_ASSET_DIR}/fonts
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${WHISPER_ANDROID_ASSET_DIR}/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${REPO_ROOT}/assets/fonts/newcomputermodern/NewCM10-Book.otf
+        ${WHISPER_ANDROID_ASSET_DIR}/fonts/
 )

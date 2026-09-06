@@ -227,7 +227,7 @@ add_subdirectory(framework/app_shell app_shell_build)
 # worst case across the faces the app actually loads).
 include(AppShellMinTextSize)
 app_shell_generate_min_text_size(
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NewCM10-Book.otf)
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/newcomputermodern/NewCM10-Book.otf)
 
 # app_shell's ui_metrics.cc includes the header that call generated; the
 # consumer owns the font list, so the consumer owns this dependency too.
@@ -305,7 +305,7 @@ endif()
 add_custom_command(TARGET whisper_destilado POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/fonts
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NewCM10-Book.otf
+        ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/newcomputermodern/NewCM10-Book.otf
         ${CMAKE_BINARY_DIR}/assets/fonts/
 )
 
@@ -327,7 +327,7 @@ if (NOT WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_custom_command(TARGET whisper_ui_capture POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets/fonts
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/NewCM10-Book.otf
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/newcomputermodern/NewCM10-Book.otf
             ${CMAKE_BINARY_DIR}/assets/fonts/
     )
 endif()
