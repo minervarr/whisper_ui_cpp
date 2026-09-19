@@ -49,9 +49,10 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
     // reliably cover base UI by draw order. While a picker is open we simply
     // don't draw the base screen — zero bleed by construction.
     if (st.popup != DrawState::Popup::None && st.popup_items) {
-        const char * title = st.popup == DrawState::Popup::Lang
-                                  ? "Selecciona el idioma"
-                                  : "Selecciona el micrófono";
+        const char * title =
+            st.popup == DrawState::Popup::Lang ? "Selecciona el idioma" :
+            st.popup == DrawState::Popup::Gpu  ? "Selecciona el GPU"    :
+                                                 "Selecciona el micrófono";
         c.text(title, L + pad, T + pad, ts.title, pal::text);
         c.text("ESC o clic fuera para cerrar", L + pad, T + pad + ts.title * 1.5f,
                ts.small, pal::dim);
@@ -108,7 +109,7 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         y += bh + pad;
     }
 
-    // ── language + microphone rows ─────────────────────────────────────────
+    // ── language + GPU + microphone rows ───────────────────────────────────
     {
         const float rh = safeH * 0.062f;
         Rect lang_row{ L + pad, y, safeW - 2 * pad, rh };
@@ -118,11 +119,24 @@ void draw_main(Canvas & c, const DrawState & st, std::vector<Hit> & hits)
         hits.push_back({lang_row, ActLangField});
         y += rh + pad * 0.5f;
 
+        Rect gpu_row{ L + pad, y, safeW - 2 * pad, rh };
+        widgets::drawDropdownField(c, gpu_row, "GPU", st.gpu_label,
+                                   gpu_row.contains(st.ptr.x, st.ptr.y),
+                                   widgets::kTextFit);
+        hits.push_back({gpu_row, ActGpuField});
+        y += rh + pad * 0.5f;
+
         Rect mic_row{ L + pad, y, safeW - 2 * pad, rh };
         widgets::drawDropdownField(c, mic_row, "Micrófono", st.mic_label,
                                    mic_row.contains(st.ptr.x, st.ptr.y),
                                    widgets::kTextFit);
         hits.push_back({mic_row, ActMicField});
+        y += rh + pad * 0.5f;
+
+        Rect trim_row{ L + pad, y, safeW - 2 * pad, rh };
+        widgets::drawToggle(c, trim_row, st.silence_trim,
+                            "Recortar silencios (evita bucles)", widgets::kToggleDefault);
+        hits.push_back({trim_row, ActSilenceTrim});
         y += rh + pad;
     }
 

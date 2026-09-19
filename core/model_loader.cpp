@@ -13,6 +13,7 @@
 #include <unistd.h>
 #endif
 
+#include "core/gpu_devices.h"
 #include "whisper.h"
 
 namespace inference {
@@ -84,7 +85,14 @@ std::filesystem::path resolve_model(std::filesystem::path & dir_out) {
 
 ModelLoader::ModelLoader() {
     std::filesystem::path dir;
-    auto picked = resolve_model(dir);
+    std::filesystem::path picked;
+    if (!model_override_.empty()) {
+        // Explicit -m/--model wins over every env-var resolution below.
+        picked = model_override_;
+        dir    = picked.parent_path();
+    } else {
+        picked = resolve_model(dir);
+    }
     if (!picked.empty()) {
         model_path_     = picked.string();
         model_filename_ = picked.filename().string();
@@ -109,8 +117,9 @@ void ModelLoader::start(core::EventQueue & queue) {
 
 void ModelLoader::worker(core::EventQueue * queue) {
     // If no model was found at construction, rescan in case the user dropped
-    // one in afterwards (rare but cheap).
-    if (model_filename_.empty()) {
+    // one in afterwards (rare but cheap). An explicit -m/--model override is
+    // never re-resolved here: what the user asked for is what we try.
+    if (model_filename_.empty() && model_override_.empty()) {
         std::filesystem::path dir;
         auto picked = resolve_model(dir);
         if (!picked.empty()) {
@@ -134,18 +143,33 @@ void ModelLoader::worker(core::EventQueue * queue) {
 
     std::error_code ec;
     if (!std::filesystem::exists(model_path_, ec)) {
-        error_msg_ = "El modelo dejó de existir entre el arranque y la carga:\n\n"
-                   + model_path_;
+        if (model_override_.empty()) {
+            error_msg_ = "El modelo dejó de existir entre el arranque y la carga:\n\n"
+                       + model_path_;
+        } else {
+            error_msg_ = "No se encontró el modelo indicado con -m/--model:\n\n"
+                       + model_path_;
+        }
         state_.store(LoadState::Failed, std::memory_order_release);
         queue->push({core::AppEvent::ModelFailed, nullptr});
         return;
     }
 
-    // Attempt 1: GPU (Vulkan).
+    // Attempt 1: GPU (Vulkan). gpu_device resolves to a concrete index here
+    // so the log line and error reporting show the device that was tried.
+    int gpu_tried = -1;
     {
         whisper_context_params cparams = whisper_context_default_params();
         cparams.use_gpu = true;
-        whisper_context * c = whisper_init_from_file_with_params(model_path_.c_str(), cparams);
+        int dev = gpu_device_;
+        if (dev < 0) {
+            dev = best_gpu_device(enumerate_gpu_devices());
+            if (dev < 0) dev = 0;      // no GPU enumerated: let whisper report
+        }
+        cparams.gpu_device = dev;
+        gpu_tried = dev;
+        whisper_context * c =
+            whisper_init_from_file_with_params(model_path_.c_str(), cparams);
         if (c) {
             ctx_.store(c, std::memory_order_release);
             gpu_used_.store(true, std::memory_order_release);
@@ -173,8 +197,25 @@ void ModelLoader::worker(core::EventQueue * queue) {
                + model_path_
                + "\n\nVerifica que el archivo no esté corrupto y que sea un "
                  ".bin o .gguf válido para whisper.cpp.";
+    if (gpu_device_ >= 0 && gpu_tried >= 0) {
+        error_msg_ += "\n\n(Se pidió explícitamente la GPU con índice "
+                    + std::to_string(gpu_tried)
+                    + "; cae en CPU si esa GPU no puede con el modelo.)";
+    }
     state_.store(LoadState::Failed, std::memory_order_release);
     queue->push({core::AppEvent::ModelFailed, nullptr});
+}
+
+void ModelLoader::reload(core::EventQueue & queue)
+{
+    // No two loads may overlap: finish the current one (if any), drop its
+    // context, then start over with the current settings.
+    if (thread_.joinable()) thread_.join();
+    whisper_context * c = ctx_.exchange(nullptr);
+    if (c) whisper_free(c);
+    gpu_used_.store(false, std::memory_order_release);
+    state_.store(LoadState::NotStarted, std::memory_order_release);
+    start(queue);
 }
 
 } // namespace inference

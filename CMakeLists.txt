@@ -116,6 +116,7 @@ add_subdirectory(first_party/audio_engine ae_engine)
 add_library(whisper_core STATIC
     core/settings.cpp
     core/model_loader.cpp
+    core/gpu_devices.cpp
     core/transcribe.cpp
     core/confidence.cpp
     core/output_format.cpp
@@ -183,7 +184,9 @@ endif()
 add_executable(whisper_tests
     tests/test_main.cpp
     tests/settings_test.cpp
+    tests/gpu_devices_test.cpp
     tests/output_format_test.cpp
+    tests/transcribe_test.cpp
     tests/event_queue_test.cpp
     tests/capture_convert_test.cpp
     tests/file_reader_test.cpp

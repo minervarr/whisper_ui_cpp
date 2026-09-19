@@ -17,6 +17,8 @@ enum Action {
     ActRecord,
     ActLangField,       // open the language popup
     ActMicField,        // open the capture-device popup
+    ActGpuField,        // open the GPU popup
+    ActSilenceTrim,     // toggle silence trimming (anti-hallucination)
     ActSave,
     ActCopy,            // copy the plain transcript to the clipboard
     ActRetryQuality,    // re-transcribe the same take with the quality preset
@@ -40,12 +42,14 @@ struct DrawState {
 
     std::string lang_label;      // "Auto-detectar idioma" | "Spanish (es)"...
     std::string mic_label;       // selected device name or "(ninguno)"
+    std::string gpu_label;       // selected GPU name or "Automático"
+    bool        silence_trim = true;  // mirror of cfg::Settings::silence_trim
     int         format_sel = 0;  // index into kFormats
     std::string save_path;
     bool        path_focused = false;
     std::string toast;           // transient confirmation line ("Guardado: …")
 
-    enum class Popup { None, Lang, Mic } popup = Popup::None;
+    enum class Popup { None, Lang, Mic, Gpu } popup = Popup::None;
     const std::vector<std::string> * popup_items = nullptr;
     int   popup_selected = -1;
     float popup_scroll = 0.0f;

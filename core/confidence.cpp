@@ -22,41 +22,42 @@ ConfidenceTier classify(float c) {
 
 } // namespace
 
-void compute_confidence(whisper_context * ctx, Result & r) {
-    if (!ctx || r.segments.empty()) {
-        r.confidence_overall = 0.0f;
-        r.tier               = ConfidenceTier::Low;
-        return;
-    }
-
+void compute_segment_confidence(whisper_context * ctx, int index, Segment & seg) {
     // Tokens with id >= tok_eot are specials or timestamps in whisper's vocab.
     const whisper_token tok_eot = whisper_token_eot(ctx);
+
+    const int n_tokens = whisper_full_n_tokens(ctx, index);
+    double sum_p   = 0.0;
+    int    n_valid = 0;
+    float  min_p   = 1.0f;
+
+    for (int t = 0; t < n_tokens; ++t) {
+        whisper_token_data td = whisper_full_get_token_data(ctx, index, t);
+        if (td.id >= tok_eot) continue;  // skip timestamps and specials
+        sum_p += td.p;
+        ++n_valid;
+        if (td.p < min_p) min_p = td.p;
+    }
+
+    seg.no_speech_prob = whisper_full_get_segment_no_speech_prob(ctx, index);
+    seg.mean_token_p   = (n_valid > 0) ? float(sum_p / n_valid) : 0.0f;
+    seg.min_token_p    = (n_valid > 0) ? min_p : 0.0f;
+    seg.confidence     = seg.mean_token_p * (1.0f - seg.no_speech_prob);
+    if (seg.confidence < 0.0f) seg.confidence = 0.0f;
+}
+
+void aggregate_confidence(Result & r) {
+    if (r.segments.empty()) {
+        r.confidence_overall = 0.0f;
+        r.tier               = ConfidenceTier::Low;
+        r.worst_segments.clear();
+        return;
+    }
 
     double sum_weighted  = 0.0;
     double sum_durations = 0.0;
 
-    for (size_t i = 0; i < r.segments.size(); ++i) {
-        Segment & seg = r.segments[i];
-
-        const int n_tokens = whisper_full_n_tokens(ctx, (int) i);
-        double sum_p   = 0.0;
-        int    n_valid = 0;
-        float  min_p   = 1.0f;
-
-        for (int t = 0; t < n_tokens; ++t) {
-            whisper_token_data td = whisper_full_get_token_data(ctx, (int) i, t);
-            if (td.id >= tok_eot) continue;  // skip timestamps and specials
-            sum_p += td.p;
-            ++n_valid;
-            if (td.p < min_p) min_p = td.p;
-        }
-
-        seg.no_speech_prob = whisper_full_get_segment_no_speech_prob(ctx, (int) i);
-        seg.mean_token_p   = (n_valid > 0) ? float(sum_p / n_valid) : 0.0f;
-        seg.min_token_p    = (n_valid > 0) ? min_p : 0.0f;
-        seg.confidence     = seg.mean_token_p * (1.0f - seg.no_speech_prob);
-        if (seg.confidence < 0.0f) seg.confidence = 0.0f;
-
+    for (const auto & seg : r.segments) {
         const double dur = std::max<double>(1.0, double(seg.t1_ms - seg.t0_ms));
         sum_weighted  += double(seg.confidence) * dur;
         sum_durations += dur;
@@ -77,6 +78,19 @@ void compute_confidence(whisper_context * ctx, Result & r) {
             r.worst_segments.push_back(indices[k]);
         }
     }
+}
+
+void compute_confidence(whisper_context * ctx, Result & r) {
+    if (!ctx || r.segments.empty()) {
+        aggregate_confidence(r);
+        return;
+    }
+
+    for (size_t i = 0; i < r.segments.size(); ++i) {
+        compute_segment_confidence(ctx, (int) i, r.segments[i]);
+    }
+
+    aggregate_confidence(r);
 }
 
 const char * tier_label(ConfidenceTier t) {

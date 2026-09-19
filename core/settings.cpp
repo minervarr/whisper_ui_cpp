@@ -122,6 +122,18 @@ Settings Settings::with_quality_preset() const
     return q;
 }
 
+Settings Settings::with_max_info_preset() const
+{
+    Settings s = *this;
+    s.keep_tokens    = true;   // capture per-token detail into the Result
+    s.suppress_nst   = false;  // keep "(silence)", "(music)", "(applause)"...
+    s.suppress_blank = false;  // keep blank/hold tokens
+    s.split_on_word  = true;   // word-aligned timestamps
+    // Greedy sampling stays (fast defaults): token-level timestamps and
+    // per-token probabilities stay clean without beam search.
+    return s;
+}
+
 std::string config_path()
 {
     std::string d = config_dir();
@@ -148,6 +160,7 @@ Settings load_settings()
 
     s.mic_device_id   = get_string(kv, "mic_device_id",   s.mic_device_id);
     s.capture_backend = get_int   (kv, "capture_backend", s.capture_backend);
+    s.gpu_device      = get_int   (kv, "gpu_device",      s.gpu_device);
 
     s.language        = get_string(kv, "language",        s.language);
     s.translate       = get_bool  (kv, "translate",       s.translate);
@@ -178,6 +191,7 @@ Settings load_settings()
     s.single_segment  = get_bool(kv, "single_segment",  s.single_segment);
     s.split_on_word   = get_bool(kv, "split_on_word",   s.split_on_word);
     s.tdrz_enable     = get_bool(kv, "tdrz_enable",     s.tdrz_enable);
+    s.silence_trim    = get_bool(kv, "silence_trim",    s.silence_trim);
     s.print_progress  = get_bool(kv, "print_progress",  s.print_progress);
     s.print_realtime  = get_bool(kv, "print_realtime",  s.print_realtime);
 
@@ -193,6 +207,7 @@ bool save_settings(const Settings & s)
     out << "[whisper]\n";
     out << "mic_device_id="   << s.mic_device_id            << "\n";
     out << "capture_backend=" << s.capture_backend          << "\n";
+    out << "gpu_device="      << s.gpu_device               << "\n";
     out << "language="        << s.language                 << "\n";
     out << "translate="       << (s.translate ? 1 : 0)      << "\n";
     out << "detect_language=" << (s.detect_language ? 1 : 0)<< "\n";
@@ -217,6 +232,7 @@ bool save_settings(const Settings & s)
     out << "single_segment="  << (s.single_segment ? 1 : 0) << "\n";
     out << "split_on_word="   << (s.split_on_word ? 1 : 0)  << "\n";
     out << "tdrz_enable="     << (s.tdrz_enable ? 1 : 0)    << "\n";
+    out << "silence_trim="    << (s.silence_trim ? 1 : 0)   << "\n";
     out << "print_progress="  << (s.print_progress ? 1 : 0) << "\n";
     out << "print_realtime="  << (s.print_realtime ? 1 : 0) << "\n";
 

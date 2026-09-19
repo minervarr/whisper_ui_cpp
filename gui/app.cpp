@@ -84,6 +84,8 @@ void App::load_state()
 
     st_.save_path = default_save_path();
     st_.ctl = &ctl_;
+    st_.gpu_label = "Automático";   // refresh_gpus() overrides with the real pick
+    st_.silence_trim = settings_.silence_trim;
 }
 
 // ── side effects ────────────────────────────────────────────────────────────
@@ -105,6 +107,20 @@ void App::refresh_devices()
 
     st_.mic_label = device_sel_ >= 0 ? devices_[(size_t) device_sel_].name
                                      : "(ninguno)";
+}
+
+void App::refresh_gpus()
+{
+    gpus_ = inference::enumerate_gpu_devices();
+    gpu_sel_ = 0;                       // row 0 is always "Automático"
+    for (size_t i = 0; i < gpus_.size(); ++i) {
+        if (gpus_[i].index == settings_.gpu_device) {
+            gpu_sel_ = (int) i + 1;
+            break;
+        }
+    }
+    st_.gpu_label = gpu_sel_ == 0 ? "Automático"
+                                  : gpus_[(size_t) gpu_sel_ - 1].name;
 }
 
 std::string App::start_capture()
@@ -187,12 +203,35 @@ void App::select_device(int index)
     cfg::save_settings(settings_);
 }
 
+void App::select_gpu(int index)
+{
+    // Popup row 0 = "Automático"; rows 1..N map to the enumerated GPUs.
+    if (index < 0 || (size_t) index > gpus_.size()) return;
+    gpu_sel_ = index;
+    settings_.gpu_device = index == 0 ? -1 : gpus_[(size_t) index - 1].index;
+    st_.gpu_label = index == 0 ? "Automático" : gpus_[(size_t) index - 1].name;
+    cfg::save_settings(settings_);
+
+    // The model runs pinned to one GPU, so a live swap means reloading (and
+    // freeing) the context. Never do that while a take or a transcription is
+    // in flight — the choice still persists and applies on the next launch.
+    if (ctl_.state() != UiState::Ready && ctl_.state() != UiState::Error) {
+        st_.toast = "El cambio de GPU se aplicará al cargar de nuevo.";
+        return;
+    }
+    ctl_.on_model_reload_started();
+    loader_.set_gpu_device(settings_.gpu_device);
+    loader_.reload(core::events());
+    st_.toast = "Recargando modelo…";
+}
+
 void App::handle_hit(int action)
 {
     if (action >= ActPopupBase && action < ActPopupClose) {
         int idx = action - ActPopupBase;
         if (st_.popup == DrawState::Popup::Lang) select_language(idx);
         else if (st_.popup == DrawState::Popup::Mic) select_device(idx);
+        else if (st_.popup == DrawState::Popup::Gpu) select_gpu(idx);
         st_.popup = DrawState::Popup::None;
         return;
     }
@@ -239,7 +278,27 @@ void App::handle_hit(int action)
             st_.popup_scroll = 0.0f;
             break;
         }
+        case ActGpuField: {
+            refresh_gpus();
+            popup_items_.clear();
+            popup_items_.push_back("Automático");
+            for (const auto & g : gpus_) {
+                std::string label = std::to_string(g.index) + " — " + g.name;
+                if (g.discrete) label += " (discreta)";
+                popup_items_.push_back(std::move(label));
+            }
+            st_.popup = DrawState::Popup::Gpu;
+            st_.popup_items = &popup_items_;
+            st_.popup_selected = gpu_sel_;
+            st_.popup_scroll = 0.0f;
+            break;
+        }
         case ActPathField:      st_.path_focused = true; break;
+        case ActSilenceTrim:
+            settings_.silence_trim = !settings_.silence_trim;
+            st_.silence_trim       = settings_.silence_trim;
+            cfg::save_settings(settings_);
+            break;
         case ActSave:           save_result(); break;
         case ActCopy:           copy_result(); break;
         case ActRetryQuality:   retranscribe(true);  break;
@@ -321,6 +380,7 @@ bool App::create(std::unique_ptr<Host> injected)
 
     loader_.start(core::events());
     refresh_devices();
+    refresh_gpus();
     return true;
 }
 

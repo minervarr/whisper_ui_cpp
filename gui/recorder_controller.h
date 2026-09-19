@@ -43,6 +43,11 @@ public:
     // `error` is the loader's Spanish message (used on failure).
     void on_model_event(const core::AppEvent & ev, const std::string & error);
 
+    // The model is being reloaded (GPU swap): Loading again so the UI shows
+    // "Cargando…" until the new ModelLoaded/ModelFailed arrives. No-op unless
+    // Ready or Error (a take/transcription never frees the context mid-run).
+    void on_model_reload_started();
+
     // Capture died mid-take (device unplugged, server gone...).
     void on_capture_aborted(const std::string & reason);
 

@@ -13,6 +13,7 @@ std::string format_txt(const Result & r);   // plain text, one line per segment,
 std::string format_vtt(const Result & r);   // WebVTT, HH:MM:SS.mmm
 std::string format_srt(const Result & r);   // SRT, HH:MM:SS,mmm
 std::string format_json(const Result & r);  // full structure with segments + confidence metrics
+std::string format_json_full(const Result & r);  // max-info: + per-token detail + settings snapshot
 std::string format_lrc(const Result & r);   // lyrics with [MM:SS.cc] timestamps
 std::string format_csv(const Result & r);   // start_ms,end_ms,text (escaped CSV)
 std::string format_tsv(const Result & r);   // start_ms<TAB>end_ms<TAB>text

@@ -48,6 +48,8 @@ TEST(missing_file_yields_defaults)
     CHECK_EQ(s.beam_size, d.beam_size);
     CHECK(s.temperature_inc == d.temperature_inc);
     CHECK_EQ(s.suppress_blank, d.suppress_blank);
+    CHECK_EQ(s.gpu_device, -1);          // new GPU field defaults to auto
+    CHECK(s.silence_trim);               // anti-hallucination guard is on by default
 }
 
 TEST(save_load_round_trip)
@@ -56,6 +58,7 @@ TEST(save_load_round_trip)
     cfg::Settings s;
     s.mic_device_id   = "hw:1,0";
     s.capture_backend = 2;
+    s.gpu_device      = 1;
     s.language        = "es";
     s.translate       = true;
     s.detect_language = true;
@@ -80,6 +83,7 @@ TEST(save_load_round_trip)
     s.single_segment  = true;
     s.split_on_word   = true;
     s.tdrz_enable     = true;
+    s.silence_trim    = false;
     s.print_progress  = true;
     s.print_realtime  = true;
 
@@ -88,6 +92,7 @@ TEST(save_load_round_trip)
 
     CHECK_EQ(r.mic_device_id,   s.mic_device_id);
     CHECK_EQ(r.capture_backend, s.capture_backend);
+    CHECK_EQ(r.gpu_device,      s.gpu_device);
     CHECK_EQ(r.language,        s.language);
     CHECK_EQ(r.translate,       s.translate);
     CHECK_EQ(r.detect_language, s.detect_language);
@@ -112,6 +117,7 @@ TEST(save_load_round_trip)
     CHECK_EQ(r.single_segment, s.single_segment);
     CHECK_EQ(r.split_on_word,  s.split_on_word);
     CHECK_EQ(r.tdrz_enable,    s.tdrz_enable);
+    CHECK_EQ(r.silence_trim,   s.silence_trim);
     CHECK_EQ(r.print_progress, s.print_progress);
     CHECK_EQ(r.print_realtime, s.print_realtime);
 }
@@ -147,4 +153,26 @@ TEST(quality_preset)
     CHECK_EQ(q.beam_size, 5);
     CHECK_EQ(q.best_of, 5);
     CHECK(q.temperature_inc == s.temperature_inc);
+}
+
+TEST(max_info_preset)
+{
+    cfg::Settings s;
+    CHECK(!s.keep_tokens);        // off by default: GUI path stays light
+    CHECK(s.suppress_nst);
+    CHECK(s.suppress_blank);
+    CHECK(!s.split_on_word);
+
+    cfg::Settings m = s.with_max_info_preset();
+    CHECK(m.keep_tokens);
+    CHECK(!m.suppress_nst);       // keep (silence), (music), (applause)...
+    CHECK(!m.suppress_blank);     // keep blank/hold tokens
+    CHECK(m.split_on_word);       // word-aligned timestamps
+    // Nothing else is disturbed.
+    CHECK(!m.use_beam_search);
+    CHECK(!m.translate);
+    CHECK(!m.single_segment);
+    CHECK(!m.carry_initial_prompt);
+    CHECK(m.temperature == s.temperature);
+    CHECK_EQ(m.beam_size, s.beam_size);
 }

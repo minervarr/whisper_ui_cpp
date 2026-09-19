@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/audio/capture.h"
+#include "core/gpu_devices.h"
 #include "core/model_loader.h"
 #include "core/settings.h"
 #include "gui/recorder_controller.h"
@@ -68,9 +69,11 @@ private:
     void save_result();
     void copy_result();
     void select_device(int index);
+    void select_gpu(int index);
     void select_language(int index);
     void handle_hit(int action);
     void refresh_devices();
+    void refresh_gpus();
 
     // Loads settings + restores language selection. Shared by create()
     // (windowed) and run_selftest() (headless).
@@ -87,6 +90,9 @@ private:
     std::vector<audio::CaptureDeviceInfo> devices_;
     int                                 device_sel_ = -1;
     int                                 lang_sel_ = 0;
+
+    std::vector<inference::GpuDeviceInfo> gpus_;
+    int                                 gpu_sel_ = 0;   // 0 = "Automático"
 
     DrawState                           st_;
     std::vector<std::string>            popup_items_;

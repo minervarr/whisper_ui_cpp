@@ -31,6 +31,24 @@ public:
     // The model path is <exe_dir>/models/, first *.bin|*.gguf alphabetically.
     void start(core::EventQueue & queue);
 
+    // GPU device index for whisper (see core/gpu_devices.h). -1 = auto:
+    // prefer the first discrete GPU, else the first integrated one.
+    // Meaningful before start()/reload(); takes effect on the next load.
+    void set_gpu_device(int index) { gpu_device_ = index; }
+    int  gpu_device() const { return gpu_device_; }
+
+    // Overrides the model path entirely (CLI -m/--model). Takes priority over
+    // the WHISPER_MODEL_PATH / WHISPER_MODEL_DIR / <exe_dir>/models
+    // resolution. Call before start()/reload().
+    void set_model_path(const std::string & path) { model_override_ = path; }
+    std::string model_override() const { return model_override_; }
+
+    // Tears down the loaded context (if any) and loads it again with the
+    // current settings (device swap). Joins the previous load thread, frees
+    // the context, then re-runs start(); pushes a fresh ModelLoaded or
+    // ModelFailed event when done.
+    void reload(core::EventQueue & queue);
+
     // Filename (no path) of the chosen model, for the UI.
     std::string model_filename() const { return model_filename_; }
 
@@ -58,6 +76,8 @@ private:
     std::string                    model_path_;
     std::string                    model_filename_;
     std::thread                    thread_;
+    int                            gpu_device_ = -1;   // -1 = auto (see header)
+    std::string                    model_override_;    // -m/--model, if any
 };
 
 } // namespace inference

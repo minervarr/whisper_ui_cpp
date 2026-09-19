@@ -15,6 +15,11 @@ struct Settings {
     // BackendKind as int (core/audio/capture.h): 0 Wasapi, 1 Alsa, 2 Jack, 3 Usb.
     int         capture_backend = -1;   // -1 = not chosen yet (auto-pick)
 
+    // --- GPU ---
+    // whisper gpu_device index (GPU/iGPU in ggml order, see core/gpu_devices.h).
+    // -1 = auto: prefer the first discrete GPU, else the first integrated one.
+    int         gpu_device = -1;
+
     // --- Language / translation ---
     std::string language        = "auto";
     bool        translate       = false;
@@ -53,12 +58,28 @@ struct Settings {
     bool        split_on_word    = false;
     bool        tdrz_enable      = false;
 
+    // --- Anti-hallucination guard ---
+    // Cuts long silent gaps out of the audio before whisper sees them (its #1
+    // trigger for repetition loops over long files); timestamps are mapped
+    // back to the absolute timeline afterwards. On by default.
+    bool        silence_trim     = true;
+
+    // Capture per-token detail (text, id, probabilities, timestamps) into the
+    // Result. Off by default so the GUI path stays light; the CLI's --full /
+    // --output json-full enables it via with_max_info_preset().
+    bool        keep_tokens      = false;
+
     // --- Debug ---
     bool        print_progress   = false;
     bool        print_realtime   = false;
 
     // Copy with the "Quality" preset applied (beam search + best_of).
     Settings with_quality_preset() const;
+
+    // Copy with the "most information" preset: keep non-speech/special tokens
+    // (silence, music...), keep blanks, split words, and capture token-level
+    // detail — the transcription loses as little of the audio as whisper can.
+    Settings with_max_info_preset() const;
 
     // Fast-mode defaults.
     static Settings fast_defaults();

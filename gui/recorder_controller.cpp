@@ -73,6 +73,13 @@ void RecorderController::on_model_event(const core::AppEvent & ev, const std::st
     }
 }
 
+void RecorderController::on_model_reload_started()
+{
+    if (state_ != UiState::Ready && state_ != UiState::Error) return;
+    state_  = UiState::Loading;
+    status_ = "Cargando modelo…";
+}
+
 void RecorderController::on_capture_aborted(const std::string & reason)
 {
     if (state_ != UiState::Recording) return;
@@ -126,6 +133,7 @@ std::string RecorderController::transcript_preview() const
     if (!last_result_ || !last_result_->error.empty()) return "";
     std::string out;
     for (const auto & seg : last_result_->segments) {
+        if (seg.rep_run) continue;   // collapse repetition-loop duplicates
         if (!out.empty()) out += "\n";
         out += seg.text;
     }
