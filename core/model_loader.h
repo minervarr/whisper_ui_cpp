@@ -78,6 +78,7 @@ private:
     std::thread                    thread_;
     int                            gpu_device_ = -1;   // -1 = auto (see header)
     std::string                    model_override_;    // -m/--model, if any
+    bool                           embedded_ = false;  // WHISPER_EMBED_MODEL build
 };
 
 } // namespace inference

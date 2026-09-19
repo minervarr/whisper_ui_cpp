@@ -16,6 +16,10 @@
 #include "core/gpu_devices.h"
 #include "whisper.h"
 
+#ifdef WHISPER_EMBED_MODEL
+#include "embedded_whisper_model.h"
+#endif
+
 namespace inference {
 
 namespace {
@@ -84,6 +88,18 @@ std::filesystem::path resolve_model(std::filesystem::path & dir_out) {
 } // namespace
 
 ModelLoader::ModelLoader() {
+#ifdef WHISPER_EMBED_MODEL
+    // Embed builds: the baked-in model is the default; a real file only wins
+    // if the user explicitly asks for one with -m/--model.
+    if (model_override_.empty()) {
+        embedded_       = true;
+        model_path_     = "(modelo integrado)";
+        model_filename_ = WHISPER_EMBED_MODEL_FILENAME;
+        return;
+    }
+    model_path_     = model_override_;
+    model_filename_ = std::filesystem::path(model_override_).filename().string();
+#else
     std::filesystem::path dir;
     std::filesystem::path picked;
     if (!model_override_.empty()) {
@@ -101,6 +117,7 @@ ModelLoader::ModelLoader() {
         model_path_     = dir.string();
         model_filename_.clear();
     }
+#endif
 }
 
 ModelLoader::~ModelLoader() {
@@ -116,10 +133,15 @@ void ModelLoader::start(core::EventQueue & queue) {
 }
 
 void ModelLoader::worker(core::EventQueue * queue) {
-    // If no model was found at construction, rescan in case the user dropped
-    // one in afterwards (rare but cheap). An explicit -m/--model override is
-    // never re-resolved here: what the user asked for is what we try.
-    if (model_filename_.empty() && model_override_.empty()) {
+    // An explicit -m/--model wins over every other source. It may be set
+    // AFTER construction (CLI/GUI build the loader first), so re-derive the
+    // file members here instead of trusting what the constructor saw.
+    if (!model_override_.empty()) {
+        model_path_     = model_override_;
+        model_filename_ = std::filesystem::path(model_override_).filename().string();
+    } else if (model_filename_.empty()) {
+        // No model yet and no explicit choice: rescan in case the user dropped
+        // one in afterwards (rare but cheap).
         std::filesystem::path dir;
         auto picked = resolve_model(dir);
         if (!picked.empty()) {
@@ -141,19 +163,43 @@ void ModelLoader::worker(core::EventQueue * queue) {
         return;
     }
 
-    std::error_code ec;
-    if (!std::filesystem::exists(model_path_, ec)) {
-        if (model_override_.empty()) {
-            error_msg_ = "El modelo dejó de existir entre el arranque y la carga:\n\n"
-                       + model_path_;
-        } else {
-            error_msg_ = "No se encontró el modelo indicado con -m/--model:\n\n"
-                       + model_path_;
+    // Source of the model bytes: the buffer baked in at build time (embed
+    // builds) unless the user explicitly chose a file with -m/--model.
+#ifdef WHISPER_EMBED_MODEL
+    const bool from_buffer = embedded_ && model_override_.empty();
+#else
+    const bool from_buffer = false;
+#endif
+    void *    embed_buf  = nullptr;
+    std::size_t embed_size = 0;
+#ifdef WHISPER_EMBED_MODEL
+    if (from_buffer) {
+        embed_buf  = const_cast<unsigned char *>(embedded_model_data());
+        embed_size = embedded_model_size();
+    } else
+#endif
+    {
+        std::error_code ec;
+        if (!std::filesystem::exists(model_path_, ec)) {
+            if (model_override_.empty()) {
+                error_msg_ = "El modelo dejó de existir entre el arranque y la carga:\n\n"
+                           + model_path_;
+            } else {
+                error_msg_ = "No se encontró el modelo indicado con -m/--model:\n\n"
+                           + model_path_;
+            }
+            state_.store(LoadState::Failed, std::memory_order_release);
+            queue->push({core::AppEvent::ModelFailed, nullptr});
+            return;
         }
-        state_.store(LoadState::Failed, std::memory_order_release);
-        queue->push({core::AppEvent::ModelFailed, nullptr});
-        return;
     }
+
+    const auto init_model = [&](const whisper_context_params & cparams) -> whisper_context * {
+        if (from_buffer) {
+            return whisper_init_from_buffer_with_params(embed_buf, embed_size, cparams);
+        }
+        return whisper_init_from_file_with_params(model_path_.c_str(), cparams);
+    };
 
     // Attempt 1: GPU (Vulkan). gpu_device resolves to a concrete index here
     // so the log line and error reporting show the device that was tried.
@@ -168,8 +214,7 @@ void ModelLoader::worker(core::EventQueue * queue) {
         }
         cparams.gpu_device = dev;
         gpu_tried = dev;
-        whisper_context * c =
-            whisper_init_from_file_with_params(model_path_.c_str(), cparams);
+        whisper_context * c = init_model(cparams);
         if (c) {
             ctx_.store(c, std::memory_order_release);
             gpu_used_.store(true, std::memory_order_release);
@@ -183,7 +228,7 @@ void ModelLoader::worker(core::EventQueue * queue) {
     {
         whisper_context_params cparams = whisper_context_default_params();
         cparams.use_gpu = false;
-        whisper_context * c = whisper_init_from_file_with_params(model_path_.c_str(), cparams);
+        whisper_context * c = init_model(cparams);
         if (c) {
             ctx_.store(c, std::memory_order_release);
             gpu_used_.store(false, std::memory_order_release);
@@ -193,10 +238,17 @@ void ModelLoader::worker(core::EventQueue * queue) {
         }
     }
 
-    error_msg_ = "whisper.cpp no pudo cargar el modelo:\n\n"
-               + model_path_
-               + "\n\nVerifica que el archivo no esté corrupto y que sea un "
-                 ".bin o .gguf válido para whisper.cpp.";
+    if (from_buffer) {
+        error_msg_ = "whisper.cpp no pudo cargar el modelo integrado ("
+                   + model_filename_
+                   + "). Verifica que el archivo incrustado en la compilación "
+                     "sea un .bin o .gguf válido para whisper.cpp.";
+    } else {
+        error_msg_ = "whisper.cpp no pudo cargar el modelo:\n\n"
+                   + model_path_
+                   + "\n\nVerifica que el archivo no esté corrupto y que sea un "
+                     ".bin o .gguf válido para whisper.cpp.";
+    }
     if (gpu_device_ >= 0 && gpu_tried >= 0) {
         error_msg_ += "\n\n(Se pidió explícitamente la GPU con índice "
                     + std::to_string(gpu_tried)

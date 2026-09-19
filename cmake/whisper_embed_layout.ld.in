@@ -1,0 +1,14 @@
+/* CMake-generated linker fragment — see WHISPER_EMBED_MODEL in CMakeLists.txt.
+   Keeps the multi-GB embedded model section at the very END of the layout
+   (after .bss). With the default small code model, PC-relative references
+   from the app and from whisper.cpp/ggml to their own data must stay within
+   the ±2 GB range; if the model blob sat inside .data they would overflow
+   ("relocation truncated to fit: R_X86_64_PC32"). Only whisper_core
+   references the model, through absolute 64-bit addresses (large code model),
+   so its distance to the blob is irrelevant.
+   INSERT AFTER makes this an augmentation of the default linker script
+   (GNU ld >= 2.26, lld, gold). */
+SECTIONS
+{
+  .embedded_model : { *(.embedded_model) }
+} INSERT AFTER .bss;

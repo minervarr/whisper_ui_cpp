@@ -1,0 +1,32 @@
+// CMake-generated — do not edit. See WHISPER_EMBED_MODEL in CMakeLists.txt.
+//
+// Exposes the whisper model baked into the executable by
+//   ld -r -b binary -o whisper_embedded_model.o <model>
+// GNU ld names the symbols from the input file's path, replacing every
+// non-alphanumeric character with '_':
+//   _binary_<mangled path>_start  /  _binary_<mangled path>_end
+// The mangled path is computed in CMake (@EMBED_SYM@) and appears verbatim
+// here, so the declarations always match what the linker produced.
+
+#pragma once
+
+#include <cstddef>
+
+extern "C" const unsigned char _binary_@EMBED_SYM@_start[];
+extern "C" const unsigned char _binary_@EMBED_SYM@_end[];
+
+namespace inference {
+
+// Bytes of the model and their length. The data lives in the executable's
+// data segment for the whole process lifetime, so whisper may keep reading
+// from it as long as it likes (whisper copies out of it during init anyway).
+inline const unsigned char * embedded_model_data() {
+    return _binary_@EMBED_SYM@_start;
+}
+
+inline std::size_t embedded_model_size() {
+    return static_cast<std::size_t>(
+        _binary_@EMBED_SYM@_end - _binary_@EMBED_SYM@_start);
+}
+
+} // namespace inference

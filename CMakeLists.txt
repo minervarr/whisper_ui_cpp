@@ -179,6 +179,98 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
+# WHISPER_EMBED_MODEL — bake a whisper model into the binaries
+# -----------------------------------------------------------------------------
+# ON: the model given by WHISPER_EMBED_MODEL_PATH (or the first models/*.bin
+#     or *.gguf if the path is left empty) is linked into every executable via
+#     `ld -r -b binary`. The app then works with NO models/ folder next to the
+#     binary: ModelLoader uses the embedded model by default, and only
+#     -m/--model switches to a real file. Cost: each binary grows by the model
+#     size (ggml-large-v3.bin ≈ 3 GB), and link times go up.
+#     GNU-compatible linkers only (Linux/Android); MSVC has no `ld -r -b
+#     binary`, so on Windows the option is rejected at configure time.
+# OFF (default): current behavior — the model is resolved at runtime from
+#     WHISPER_MODEL_PATH, WHISPER_MODEL_DIR or <exe>/models.
+# -----------------------------------------------------------------------------
+set(WHISPER_EMBED_MODEL      OFF  CACHE BOOL     "Incrustar el modelo whisper en los binarios")
+set(WHISPER_EMBED_MODEL_PATH ""   CACHE FILEPATH "Modelo a incrustar (vacío: el primero de models/)")
+
+if (WHISPER_EMBED_MODEL)
+    if (WIN32)
+        message(FATAL_ERROR "WHISPER_EMBED_MODEL requiere un linker GNU (ld). En Windows usa "
+                            "-m/--model o la carpeta models/ como hasta ahora.")
+    endif()
+
+    if (NOT WHISPER_EMBED_MODEL_PATH)
+        file(GLOB _embed_candidates
+            ${CMAKE_CURRENT_SOURCE_DIR}/models/*.bin
+            ${CMAKE_CURRENT_SOURCE_DIR}/models/*.gguf)
+        list(SORT _embed_candidates)
+        if (_embed_candidates)
+            list(GET _embed_candidates 0 WHISPER_EMBED_MODEL_PATH)
+        else()
+            message(FATAL_ERROR "WHISPER_EMBED_MODEL=ON y no hay ningún .bin/.gguf en "
+                                "models/. Pasa -DWHISPER_EMBED_MODEL_PATH=<ruta al modelo>.")
+        endif()
+    endif()
+    if (NOT EXISTS "${WHISPER_EMBED_MODEL_PATH}")
+        message(FATAL_ERROR "WHISPER_EMBED_MODEL_PATH no existe: ${WHISPER_EMBED_MODEL_PATH}")
+    endif()
+
+    get_filename_component(_embed_name "${WHISPER_EMBED_MODEL_PATH}" NAME)
+
+    # GNU objcopy corrupts the section contents of multi-GB objects (writes
+    # zeros with the correct size); llvm-objcopy handles them correctly.
+    find_program(_EMBED_OBJCOPY NAMES llvm-objcopy llvm-objcopy-19 llvm-objcopy-18
+                                 llvm-objcopy-17 llvm-objcopy-16)
+    if (NOT _EMBED_OBJCOPY)
+        message(FATAL_ERROR "WHISPER_EMBED_MODEL necesita llvm-objcopy "
+                            "(instala el paquete llvm).")
+    endif()
+
+    # GNU ld names the embedded symbols from the input path: `_binary_<path>_start`
+    # / `_binary_<path>_end`, with every non-alphanumeric character replaced by
+    # '_'. Compute the exact same name so the generated header matches the object.
+    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" _embed_sym "${WHISPER_EMBED_MODEL_PATH}")
+    set(EMBED_SYM "${_embed_sym}")
+
+    set(_embed_obj "${CMAKE_BINARY_DIR}/whisper_embedded_model.o")
+    set(_embed_hdr "${CMAKE_BINARY_DIR}/core/embedded_whisper_model.h")
+    set(_embed_ld  "${CMAKE_BINARY_DIR}/whisper_embed_layout.ld")
+
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/embedded_whisper_model.h.in"
+                   "${_embed_hdr}" @ONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/whisper_embed_layout.ld.in"
+                   "${_embed_ld}" @ONLY)
+
+    add_custom_command(
+        OUTPUT "${_embed_obj}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}"
+        COMMAND "${CMAKE_LINKER}" -r -b binary -o "${_embed_obj}" "${WHISPER_EMBED_MODEL_PATH}"
+        # The multi-GB blob must NOT sit inside .data (it would push every
+        # small-model PC-relative reference out of the ±2 GB range). Rename its
+        # section so the linker fragment in whisper_embed_layout.ld can place
+        # it AFTER .bss, at the very end of the layout.
+        COMMAND "${_EMBED_OBJCOPY}" --rename-section .data=.embedded_model,alloc,load,data
+                "${_embed_obj}"
+        DEPENDS "${WHISPER_EMBED_MODEL_PATH}"
+        COMMENT "Incrustando modelo whisper (${_embed_name})…"
+        VERBATIM)
+
+    # The object goes into whisper_core as an external object file: CMake
+    # archives it AFTER the .cpp members, so GNU ld resolves the embedded
+    # symbols in the archive's single pass (model_loader.o references them and
+    # embeds.o follows it). Every consumer (cli, gui, tests) links the archive.
+    target_include_directories(whisper_core PUBLIC "${CMAKE_BINARY_DIR}/core")
+    target_sources(whisper_core PRIVATE "${_embed_obj}")
+    target_compile_definitions(whisper_core PRIVATE
+        WHISPER_EMBED_MODEL
+        WHISPER_EMBED_MODEL_FILENAME="${_embed_name}")
+
+    message(STATUS "Modelo whisper incrustado: ${_embed_name}")
+endif()
+
+# -----------------------------------------------------------------------------
 # tests
 # -----------------------------------------------------------------------------
 add_executable(whisper_tests
@@ -333,4 +425,37 @@ if (NOT WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/newcomputermodern/NewCM10-Book.otf
             ${CMAKE_BINARY_DIR}/assets/fonts/
     )
+endif()
+
+# -----------------------------------------------------------------------------
+# Embed builds: every first-party target must use the large code model.
+# With the default small code model, PC-relative references from our own
+# objects to their .bss/.data can exceed the ±2 GB range once the multi-GB
+# embedded model sits in .data between them and the code (link error
+# "relocation truncated to fit: R_X86_64_PC32"). Two measures keep every
+# reference in range:
+#   1. -mcmodel=large for first-party code: its own data references become
+#      absolute 64-bit, so the model's distance is irrelevant. whisper_core is
+#      the only code that touches the embedded blob.
+#   2. -Wl,-T whisper_embed_layout.ld moves the model section AFTER .bss, at
+#      the very end of the layout, so third-party code (whisper, ggml, soxr,
+#      app_shell, vk_canvas — still small-model) sees its own .data/.bss next
+#      to its text, within the ±2 GB range.
+# -----------------------------------------------------------------------------
+if (WHISPER_EMBED_MODEL)
+    foreach(_tgt whisper_core whisper_tests whisper_destilado_cli
+                 whisper_gui_lib whisper_destilado whisper_ui_capture)
+        if (TARGET ${_tgt})
+            if (NOT APPLE AND (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64"
+                               OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64"))
+                target_compile_options(${_tgt} PRIVATE -mcmodel=large)
+            endif()
+        endif()
+    endforeach()
+    foreach(_exe whisper_tests whisper_destilado_cli
+                whisper_destilado whisper_ui_capture)
+        if (TARGET ${_exe})
+            target_link_options(${_exe} PRIVATE "-Wl,-T,${_embed_ld}")
+        endif()
+    endforeach()
 endif()

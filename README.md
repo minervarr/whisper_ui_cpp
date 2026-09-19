@@ -35,6 +35,26 @@ one of these before starting the app — checked in this order, both bypass
 - `WHISPER_MODEL_DIR=/path/to/folder` — scan this folder instead (same
   alphabetical-first rule).
 
+### Optional: embed the model into the binaries (no `models/` folder needed)
+
+`-DWHISPER_EMBED_MODEL=ON` bakes a model into every executable — the app then
+works out of the box on any machine, no model file to ship or resolve. With it:
+
+```sh
+cmake -S . -B build/linux_native \
+    -DWHISPER_EMBED_MODEL=ON \
+    -DWHISPER_EMBED_MODEL_PATH=/path/to/ggml-large-v3.bin
+```
+
+If `WHISPER_EMBED_MODEL_PATH` is left empty, the first `models/*.bin|*.gguf`
+(of the project, not the build dir) is used. Trade-offs:
+
+- each binary grows by the model size (large-v3 ≈ 3 GB) and link time goes up;
+- an explicit `-m/--model` still wins and loads a real file;
+- GNU linkers only (Linux/Android native): `ld -r -b binary` + `llvm-objcopy`;
+  on Windows configure aborts with a clear message (keep using `models/` there).
+  Default is `OFF` (the resolution rules above apply).
+
 ## Binaries
 
 | Binary | What |
