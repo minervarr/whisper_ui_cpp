@@ -4,7 +4,7 @@
 # (NOT pipewire-jack), wayland-client/wayland-cursor/xkbcommon dev headers,
 # a Vulkan loader + headers, and the Slang shader compiler (slangc).
 #
-# Usage: scripts/linux/build.sh [release|debug|--share|--packages] [--clean] [cmake args...]
+# Usage: scripts/linux/build.sh [release|debug|--share|--packages] [--embed[=model]] [--clean] [cmake args...]
 # Passing a mode explicitly (scripts, CI) always skips straight to the
 # build — same for non-interactive stdin (defaults to Release, v3).
 #
@@ -37,6 +37,15 @@
 #   Debug combo picked interactively) are left unpackaged in
 #   build/linux_share_debug/ -- Debug output isn't the kind of thing you hand
 #   someone.
+#
+# [--embed[=model]] -- bake a whisper model into the binaries (sets
+#   WHISPER_EMBED_MODEL=ON): the app then needs no models/ folder at runtime.
+#   With --embed=/path/to/model.bin that file is embedded; without a path,
+#   cmake uses the first models/*.bin|*.gguf in the repo root, or stops with a
+#   clear message (use the flag with a path in that case). Each binary grows
+#   by the model size (large-v3 ≈ 3 GB), so --embed + --share means four
+#   ~3 GB bins. Not supported with --packages: the PKGBUILD owns its own
+#   configure, so embed there by editing packaging/arch/PKGBUILD.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -45,6 +54,8 @@ SHARE=0
 PACKAGES=0
 CLEAN=0
 MODE_SET=0
+EMBED=0
+EMBED_MODEL_PATH=""
 ARCH_LEVEL=""
 ARCH_SUFFIX=""
 CMAKE_ARGS=()
@@ -55,6 +66,8 @@ for arg in "$@"; do
         release|--release) BUILD_TYPE=Release; MODE_SET=1 ;;
         --share)           SHARE=1; MODE_SET=1 ;;
         --packages)        PACKAGES=1; MODE_SET=1 ;;
+        --embed)           EMBED=1 ;;
+        --embed=*)         EMBED=1; EMBED_MODEL_PATH="${arg#--embed=}" ;;
         --clean)           CLEAN=1 ;;
         *)                 CMAKE_ARGS+=("$arg") ;;
     esac
@@ -108,6 +121,21 @@ if [[ "$MODE_SET" -eq 0 && -t 0 ]]; then
 fi
 
 git submodule update --init --recursive
+
+# --embed: bake the whisper model into the binaries (WHISPER_EMBED_MODEL=ON).
+# A path given as --embed=... wins; otherwise cmake auto-picks the first
+# models/*.bin|*.gguf in the repo root, or fails with a clear message. Warn
+# up front so the long build that follows doesn't die on a missing model.
+EMBED_ARGS=()
+if [[ "$EMBED" -eq 1 ]]; then
+    EMBED_ARGS=(-DWHISPER_EMBED_MODEL=ON)
+    if [[ -n "$EMBED_MODEL_PATH" ]]; then
+        EMBED_ARGS+=(-DWHISPER_EMBED_MODEL_PATH="$EMBED_MODEL_PATH")
+    elif ! compgen -G "models/*.bin" >/dev/null && ! compgen -G "models/*.gguf" >/dev/null; then
+        echo "note: --embed given without a model path and no models/*.bin|*.gguf in the repo;" >&2
+        echo "      use --embed=/path/to/model.bin (or -DWHISPER_EMBED_MODEL_PATH=...)." >&2
+    fi
+fi
 
 # vk_canvas resolves slangc from $VULKAN_SDK/bin/slangc, falling back to a
 # hardcoded Windows path if VULKAN_SDK is unset. Point at it explicitly
@@ -165,6 +193,11 @@ if [[ "$PACKAGES" -eq 1 ]]; then
     if [[ ${#CMAKE_ARGS[@]} -gt 0 ]]; then
         echo "note: extra cmake args are not forwarded to makepkg;" >&2
         echo "      edit $PKG_DIR/PKGBUILD's build() instead: ${CMAKE_ARGS[*]}" >&2
+    fi
+    if [[ "$EMBED" -eq 1 ]]; then
+        echo "error: --embed is not supported with --packages (the PKGBUILD owns its cmake flags)." >&2
+        echo "      edit $PKG_DIR/PKGBUILD's build() to add WHISPER_EMBED_MODEL=ON there." >&2
+        exit 2
     fi
 
     if [[ "$CLEAN" -eq 1 ]]; then
@@ -239,7 +272,7 @@ if [[ "$SHARE" -eq 1 ]]; then
         cmake -S . -B "$variant_dir" -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DWHISPER_ARCH_LEVEL="$level" \
-            "${SLANGC_ARG[@]}" "${CMAKE_ARGS[@]}"
+            "${SLANGC_ARG[@]}" "${EMBED_ARGS[@]}" "${CMAKE_ARGS[@]}"
         cmake --build "$variant_dir"
 
         if [[ "$BUILD_TYPE" == "Release" ]]; then
@@ -249,7 +282,10 @@ if [[ "$SHARE" -eq 1 ]]; then
             pkg_name="whisper_destilado-linux-$variant"
             pkg_dir="$DIST_DIR/$pkg_name"
             rm -rf "$pkg_dir"
-            mkdir -p "$pkg_dir/models"
+            mkdir -p "$pkg_dir"
+            # An embed build carries the model inside the binary, so no
+            # models/ folder is needed in the package.
+            [[ "$EMBED" -eq 1 ]] || mkdir -p "$pkg_dir/models"
             cp "$variant_dir/whisper_destilado" "$pkg_dir/"
             cp -r "$variant_dir/assets" "$pkg_dir/assets"
             tar -C "$DIST_DIR" -czf "$DIST_DIR/$pkg_name.tar.gz" "$pkg_name"
@@ -292,7 +328,7 @@ ARCH_ARG=()
 echo "Configuring CMake (Ninja, $BUILD_TYPE${ARCH_LEVEL:+, arch=$ARCH_LEVEL}) -> $BUILD_DIR..."
 cmake -S . -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    "${ARCH_ARG[@]}" "${SLANGC_ARG[@]}" "${CMAKE_ARGS[@]}"
+    "${ARCH_ARG[@]}" "${SLANGC_ARG[@]}" "${EMBED_ARGS[@]}" "${CMAKE_ARGS[@]}"
 cmake --build "$BUILD_DIR"
 
 echo
@@ -303,5 +339,9 @@ echo "  whisper_tests           (unit tests)"
 if [[ "$BUILD_TYPE" == "Debug" ]]; then
     echo "  whisper_ui_capture      (headless UI snapshots -- debug only)"
 fi
-echo "Place a whisper model (.bin/.gguf) in $BUILD_DIR/models/"
-echo "  (or set WHISPER_MODEL_DIR=<folder> / WHISPER_MODEL_PATH=<file> to use one elsewhere)"
+if [[ "$EMBED" -eq 1 ]]; then
+    echo "Model: EMBEDDED in each binary (WHISPER_EMBED_MODEL=ON) -- they work with no models/ folder."
+else
+    echo "Place a whisper model (.bin/.gguf) in $BUILD_DIR/models/"
+    echo "  (or set WHISPER_MODEL_DIR=<folder> / WHISPER_MODEL_PATH=<file> to use one elsewhere)"
+fi
